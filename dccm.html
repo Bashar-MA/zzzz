@@ -191,7 +191,7 @@ let _clipCounter=0;
 function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,axisTitlePad){
   const n=matrix.length; if(!n) return '';
   axisTitlePad = axisTitlePad||14;
-  const ml=x+38,mr=x+w-6,mt=y+22,mb=y+h-30, drawW=mr-ml, drawH=mb-mt, cell=drawW/n;
+  const ml=x+38,mr=x+w-6,mt=y+22,mb=y+h-30, drawW=mr-ml, drawH=mb-mt, cellX=drawW/n, cellY=drawH/n;
   const clipId='clip'+(_clipCounter++);
   let s='';
   if(title) s+=`<text x="${x+w/2}" y="${y+14}" text-anchor="middle" ${fontB} fill="${titleCol}">${escXml(title)}</text>`;
@@ -202,8 +202,8 @@ function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fon
       let color;
       if(mode==='diff'){ if(Math.abs(v)<cutoff) continue; color = v>0?posColor:negColor; }
       else { color = divergingColor(v,cmap); }
-      const px=ml+c*cell, py=mt+(n-1-r)*cell;
-      s+=`<rect x="${px.toFixed(2)}" y="${py.toFixed(2)}" width="${(cell+0.6).toFixed(2)}" height="${(cell+0.6).toFixed(2)}" fill="${color}"/>`;
+      const px=ml+c*cellX, py=mt+(n-1-r)*cellY;
+      s+=`<rect x="${px.toFixed(2)}" y="${py.toFixed(2)}" width="${(cellX+0.6).toFixed(2)}" height="${(cellY+0.6).toFixed(2)}" fill="${color}"/>`;
     }
   }
   s+='</g>';
@@ -211,7 +211,7 @@ function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fon
   const xLabelY = mb+3+tickPad+10;
   const yLabelX = ml-3-tickPad-10;
   stepTicks(startRes,startRes+n-1,tickStep,true).forEach(t=>{
-    const idx=t-startRes; const px=ml+(idx+0.5)*cell, py=mt+(n-1-idx+0.5)*cell;
+    const idx=t-startRes; const px=ml+(idx+0.5)*cellX, py=mt+(n-1-idx+0.5)*cellY;
     s+=`<line x1="${px}" y1="${mb}" x2="${px}" y2="${mb+3}" stroke="#222"/><text x="${px}" y="${xLabelY}" text-anchor="middle" ${fontA} fill="${tickCol}">${t}</text>`;
     s+=`<line x1="${ml-3}" y1="${py}" x2="${ml}" y2="${py}" stroke="#222"/><text x="${ml-3-tickPad}" y="${py+3.5}" text-anchor="end" ${fontA} fill="${tickCol}">${t}</text>`;
   });
