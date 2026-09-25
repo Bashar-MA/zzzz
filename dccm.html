@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DCCM Heatmaps</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/svg2pdf.js/2.2.3/svg2pdf.umd.min.js"></script>
+<style>
+  :root{--ink:#1c2330;--line:#d8dee8;--panel:#fbfcfe;--accent:#2f5fd6;--muted:#69728a;--bg:#eef1f6;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);
+       display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px;}
+  #nav{flex:0 0 auto;display:flex;gap:16px;align-items:center;padding:8px 16px;background:#1c2330;color:#fff;font-size:12px;}
+  #nav a{color:#cdd6ea;text-decoration:none;} #nav a.active{color:#fff;font-weight:700;}
+  #main{flex:1;display:flex;overflow:hidden;}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 8px;}
+  h2:first-child{margin-top:0;}
+  #panel{width:400px;flex:0 0 400px;background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow-y:auto;}
+  #canvasWrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;}
+  label{display:block;font-size:11px;color:var(--muted);margin:6px 0 3px;}
+  input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;background:#fff;color:var(--ink);font-family:inherit;}
+  .row{display:flex;gap:8px;} .row>div{flex:1;}
+  button{width:100%;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;}
+  button.secondary{background:#3a4256;} button.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent);}
+  .box{border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px;background:#fff;}
+  .check{display:flex;align-items:center;gap:6px;margin:6px 0;} .check input{width:auto;}
+  .tabs{display:flex;gap:4px;margin-bottom:10px;} .tabs button{margin:0;background:#e4e8ef;color:var(--ink);}
+  .tabs button.active{background:var(--accent);color:#fff;}
+  .item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:6px;font-size:11px;background:#fff;}
+  .item .txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .item .del{cursor:pointer;color:#c0392b;font-weight:700;}
+  #svgHost{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;}
+  #svgHost svg{max-width:100%;height:auto;}
+  .palette{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:4px;}
+  .sw{aspect-ratio:1;border-radius:3px;font-size:8px;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;text-shadow:0 0 2px rgba(0,0,0,.7);}
+  .sw.sel{border-color:#1c2330;}
+  .palNum{display:flex;gap:6px;align-items:center;margin-top:4px;} .palNum input{width:60px;} .palNum span{font-size:10px;color:var(--muted);}
+  .hint{font-size:10px;color:var(--muted);margin-top:4px;}
+  .subh{font-size:11px;font-weight:700;margin-top:10px;color:var(--ink);}
+  .dsEntry{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;background:#fff;}
+</style>
+</head>
+<body>
+<div id="nav"><span style="font-weight:700">Figure Tools</span><a href="index.html">Home</a><a href="timeline.html">Timeline Diagram</a><a href="domains.html">Protein Domain Map</a><a href="plots.html">Analysis Plots</a><a href="multipanel.html">Multi-Panel Layout</a><a href="dccm.html" class="active">DCCM Heatmaps</a></div>
+<div id="main">
+<div id="panel">
+  <div class="tabs">
+    <button id="tabTwo" class="active" onclick="switchTab('two')">Two-File Comparison</button>
+    <button id="tabGrid" onclick="switchTab('grid')">Multi-File Grid</button>
+  </div>
+
+  <div id="twoUI"></div>
+  <div id="gridUI" style="display:none"></div>
+
+  <h2>Style (applies to both tabs)</h2>
+  <div class="box">
+    <label>Start residue number (renumbers row/col 1 \u2192 this value)</label>
+    <input id="startRes" type="number" value="680">
+    <label>Tick step (every Nth residue labeled)</label>
+    <input id="tickStep" type="number" value="10" min="1">
+    <label>Tick label distance from axis (px)</label>
+    <input id="tickPad" type="number" value="6" min="0">
+    <div class="subh">Heatmap colormap (raw DCCM)</div>
+    <select id="cmapPreset" onchange="onCmapChange()">
+      <option value="GreenYellowRed">Green \u2013 Yellow \u2013 Red</option>
+      <option value="BlueWhiteRed">Blue \u2013 White \u2013 Red</option>
+      <option value="PurpleWhiteOrange">Purple \u2013 White \u2013 Orange</option>
+      <option value="CoolWarm">Cool \u2013 Warm</option>
+      <option value="custom">Custom (pick 3 colors)</option>
+    </select>
+    <div id="cmapCustomBox" style="display:none">
+      <label>Color at \u22121.0</label><div id="pal-cmapNeg"></div>
+      <label>Color at 0.0</label><div id="pal-cmapMid"></div>
+      <label>Color at +1.0</label><div id="pal-cmapPos"></div>
+    </div>
+    <div class="subh">Difference plot</div>
+    <div class="row"><div><label>Cutoff (|value| \u2265)</label><input id="cutoff" type="number" value="0.2" step="0.05"></div></div>
+    <label>Positive color</label><div id="pal-diffPos"></div>
+    <label>Negative color</label><div id="pal-diffNeg"></div>
+  </div>
+  <div class="box" id="fontTick"></div>
+  <div class="box" id="fontTitle"></div>
+</div>
+<div id="canvasWrap"><div id="svgHost"></div></div>
+</div>
+<script>
+/* ===== shared helper code (self-contained, no external file needed) ===== */
+function $(id){return document.getElementById(id);}
+function hsl2hex(h,s,l){ s/=100; l/=100; const k=n=>(n+h/30)%12; const a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1))); const toHex=x=>Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`; }
+const PALETTE = Array.from({length:40},(_,i)=>hsl2hex(Math.round(i*9),65,50));
+function hexToRgb(h){ h=h.replace('#',''); return {r:parseInt(h.substr(0,2),16),g:parseInt(h.substr(2,2),16),b:parseInt(h.substr(4,2),16)}; }
+function rgbToHex(r,g,b){ const c=v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0'); return '#'+c(r)+c(g)+c(b); }
+function lerpColor(c1,c2,t){ const p=hexToRgb(c1),q=hexToRgb(c2); return rgbToHex(p.r+(q.r-p.r)*t,p.g+(q.g-p.g)*t,p.b+(q.b-p.b)*t); }
+function physicalToPx(value,unit){ const perInch=96; const factor=unit==='cm'?perInch/2.54:unit==='mm'?perInch/25.4:perInch; return (parseFloat(value)||0)*factor; }
+function stepTicks(start,end,step,intOnly){ start=parseFloat(start);end=parseFloat(end);step=Math.abs(parseFloat(step))||1;
+  if(isNaN(start)||isNaN(end)) return []; const t=[]; for(let v=Math.min(start,end); v<=Math.max(start,end)+1e-9; v+=step) t.push(intOnly?Math.round(v):Math.round(v*1000)/1000);
+  return start<=end?t:t.reverse(); }
+function escXml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function downloadSVG(svgEl,filename){ const blob=new Blob([svgEl.outerHTML],{type:'image/svg+xml'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+function downloadText(text,filename,mime){ const blob=new Blob([text],{type:mime||'text/csv'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+async function exportVectorPDF(svgEl,wIn,hIn,filename){ const {jsPDF}=window.jspdf; const pdf=new jsPDF({unit:'in',format:[wIn,hIn]}); await pdf.svg(svgEl,{x:0,y:0,width:wIn,height:hIn}); pdf.save(filename); }
+function createPalette(container,initialIdx,onChange){
+  let idx=initialIdx||1;
+  function draw(){
+    container.innerHTML='<div class="palette">'+PALETTE.map((c,i)=>`<div class="sw${i+1===idx?' sel':''}" style="background:${c}" data-i="${i+1}">${i+1}</div>`).join('')+
+      '</div><div class="palNum"><input type="number" min="1" max="40" value="'+idx+'"><span>type 1\u201340</span></div>';
+    container.querySelectorAll('.sw').forEach(el=>el.onclick=()=>{idx=parseInt(el.dataset.i);draw();onChange(PALETTE[idx-1],idx);});
+    container.querySelector('input').onchange=e=>{idx=Math.max(1,Math.min(40,parseInt(e.target.value)||1));draw();onChange(PALETTE[idx-1],idx);};
+  }
+  draw();
+  return {get:()=>({color:PALETTE[idx-1],idx}), set:(i)=>{idx=i;draw();}};
+}
+function fontRoleHTML(role,title){
+  return `<div class="subh">${title}</div>
+    <div class="row"><div><label>Family</label><select id="${role}Family">
+      <option value="Arial, Helvetica, sans-serif">Arial</option><option value="Georgia, serif">Georgia</option>
+      <option value="'Times New Roman', serif">Times New Roman</option><option value="'Courier New', monospace">Courier New</option>
+      <option value="Verdana, sans-serif">Verdana</option></select></div>
+    <div><label>Style</label><select id="${role}Style"><option value="normal">Normal</option><option value="italic">Italic</option><option value="bold">Bold</option><option value="bolditalic">Bold Italic</option></select></div></div>
+    <div class="row" style="margin-top:6px"><div><label>Size</label><input id="${role}Size" type="number" value="12"></div>
+    <div><label>Color</label><select id="${role}ColorMode"><option value="default">Default</option><option value="custom">Custom</option></select></div></div>
+    <div id="${role}ColorBox" style="display:none"><div id="pal-${role}"></div></div>`;
+}
+function initFontRole(role,onChange){
+  ['Family','Style','Size'].forEach(k=>{ const el=$(role+k); el.addEventListener('input',onChange); el.addEventListener('change',onChange); });
+  const modeEl=$(role+'ColorMode');
+  modeEl.addEventListener('change',()=>{ $(role+'ColorBox').style.display=modeEl.value==='custom'?'block':'none'; onChange(); });
+  return createPalette($('pal-'+role),1,onChange);
+}
+function fontAttrs(family,styleMode,size){
+  let style='normal',weight='normal';
+  if(styleMode==='italic') style='italic'; else if(styleMode==='bold') weight='bold'; else if(styleMode==='bolditalic'){style='italic';weight='bold';}
+  return `font-family="${family}" font-style="${style}" font-weight="${weight}" font-size="${size}"`;
+}
+function roleFontAttrs(role){ return fontAttrs($(role+'Family').value,$(role+'Style').value,$(role+'Size').value); }
+function roleColor(role,pal,fallback){ return $(role+'ColorMode').value==='custom'?pal.get().color:fallback; }
+function loadFile(file,cb){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    const r=new FileReader(); r.onload=e=>{ const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'}); cb(XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]])); }; r.readAsArrayBuffer(file);
+  } else { const r=new FileReader(); r.onload=e=>cb(e.target.result); r.readAsText(file); }
+}
+function parseMatrix(text){
+  const lines=text.trim().split(/\r?\n/).filter(l=>l.length);
+  if(lines.length<2) return [];
+  const delim=lines[0].includes('\t')?'\t':',';
+  const m=[];
+  for(let i=1;i<lines.length;i++){ const cells=lines[i].split(delim); m.push(cells.slice(1).map(v=>parseFloat(v))); }
+  return m;
+}
+function matrixToCSV(m,startRes){
+  const n=m.length; let out=','+Array.from({length:n},(_,i)=>'V'+(i+1)).join(',')+'\n';
+  m.forEach((row,i)=>{ out += (startRes+i)+','+row.map(v=>isFinite(v)?v.toFixed(4):'').join(',')+'\n'; });
+  return out;
+}
+
+const CMAP_PRESETS={ GreenYellowRed:{neg:'#d73027',mid:'#ffffbf',pos:'#1a9850'}, BlueWhiteRed:{neg:'#2166ac',mid:'#ffffff',pos:'#b2182b'},
+  PurpleWhiteOrange:{neg:'#542788',mid:'#ffffff',pos:'#e08214'}, CoolWarm:{neg:'#3b4cc0',mid:'#dddddd',pos:'#b40426'} };
+let cmapNegPal,cmapMidPal,cmapPosPal,diffPosPal,diffNegPal,tickPal,titlePal;
+$('fontTick').innerHTML=fontRoleHTML('tick','Axis Tick Numbers');
+$('fontTitle').innerHTML=fontRoleHTML('title','Panel Titles');
+function initRoles(){
+  tickPal=initFontRole('tick',render); titlePal=initFontRole('title',render);
+  cmapNegPal=createPalette($('pal-cmapNeg'),1,render); cmapMidPal=createPalette($('pal-cmapMid'),1,render); cmapPosPal=createPalette($('pal-cmapPos'),1,render);
+  const posIdx=PALETTE.findIndex(c=>c.toLowerCase()==='#'+hsl2hex(153,65,50).slice(1))+1;
+  diffPosPal=createPalette($('pal-diffPos'), 18, render);
+  diffNegPal=createPalette($('pal-diffNeg'), 4, render);
+}
+function onCmapChange(){ $('cmapCustomBox').style.display = $('cmapPreset').value==='custom'?'block':'none'; render(); }
+function currentCmap(){
+  if($('cmapPreset').value==='custom') return {neg:cmapNegPal.get().color, mid:cmapMidPal.get().color, pos:cmapPosPal.get().color};
+  return CMAP_PRESETS[$('cmapPreset').value];
+}
+function divergingColor(val,cmap){
+  val=Math.max(-1,Math.min(1,val||0));
+  if(val>=0) return lerpColor(cmap.mid,cmap.pos,val);
+  return lerpColor(cmap.mid,cmap.neg,-val);
+}
+['startRes','tickStep','tickPad','cutoff'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
+
+/* ===== drawing a single heatmap panel ===== */
+function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes){
+  const n=matrix.length; if(!n) return '';
+  const ml=x+38,mr=x+w-6,mt=y+22,mb=y+h-30, drawW=mr-ml, drawH=mb-mt, cell=drawW/n;
+  let s='';
+  if(title) s+=`<text x="${x+w/2}" y="${y+14}" text-anchor="middle" ${fontB} fill="${titleCol}">${escXml(title)}</text>`;
+  for(let r=0;r<n;r++){
+    for(let c=0;c<n;c++){
+      const v=matrix[r][c]; if(v===undefined||isNaN(v)) continue;
+      let color;
+      if(mode==='diff'){ if(Math.abs(v)<cutoff) continue; color = v>0?posColor:negColor; }
+      else { color = divergingColor(v,cmap); }
+      const px=ml+c*cell, py=mt+(n-1-r)*cell;
+      s+=`<rect x="${px.toFixed(2)}" y="${py.toFixed(2)}" width="${(cell+0.5).toFixed(2)}" height="${(cell+0.5).toFixed(2)}" fill="${color}"/>`;
+    }
+  }
+  s+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1"/>`;
+  stepTicks(startRes,startRes+n-1,tickStep,true).forEach(t=>{
+    const idx=t-startRes; const px=ml+(idx+0.5)*cell, py=mt+(n-1-idx+0.5)*cell;
+    s+=`<line x1="${px}" y1="${mb}" x2="${px}" y2="${mb+3}" stroke="#222"/><text x="${px}" y="${mb+3+tickPad+10}" text-anchor="middle" ${fontA} fill="${tickCol}">${t}</text>`;
+    s+=`<line x1="${ml-3}" y1="${py}" x2="${ml}" y2="${py}" stroke="#222"/><text x="${ml-3-tickPad}" y="${py+3.5}" text-anchor="end" ${fontA} fill="${tickCol}">${t}</text>`;
+  });
+  s+=`<text x="${x+w/2}" y="${mb+3+tickPad+24}" text-anchor="middle" ${fontA} fill="${titleCol}">Residue</text>`;
+  s+=`<text x="${x+12}" y="${mt+drawH/2}" text-anchor="middle" ${fontA} fill="${titleCol}" transform="rotate(-90 ${x+12} ${mt+drawH/2})">Residue</text>`;
+  return s;
+}
+function diffMatrix(a,b){ const n=Math.min(a.length,b.length); const out=[]; for(let i=0;i<n;i++){ out.push([]); for(let j=0;j<Math.min(a[i].length,b[i].length);j++) out[i].push(a[i][j]-b[i][j]); } return out; }
+
+/* ============================= TAB 1: TWO-FILE COMPARISON ============================= */
+$('twoUI').innerHTML = `
+  <h2>Files</h2>
+  <div class="box">
+    <label>File A</label><input type="file" id="fileA" accept=".csv,.tsv,.xlsx,.xls">
+    <label>File B</label><input type="file" id="fileB" accept=".csv,.tsv,.xlsx,.xls">
+    <button class="ghost" onclick="loadTwoSample()">Load Sample Data</button>
+    <label style="margin-top:8px">Subtract</label>
+    <select id="subOrder"><option value="AB">File A \u2212 File B</option><option value="BA">File B \u2212 File A</option></select>
+  </div>
+  <h2>Layout</h2>
+  <div class="box">
+    <div class="row"><div><label>Unit</label><select id="twoUnit"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select></div>
+      <div><label>Panel Width</label><input id="twoW" type="number" value="7" step="0.1"></div>
+      <div><label>Panel Height</label><input id="twoH" type="number" value="7" step="0.1"></div></div>
+    <label>Gap between the 3 panels</label><input id="twoGap" type="number" value="0.6" step="0.1">
+  </div>
+  <h2>Export</h2>
+  <button class="secondary" onclick="exportTwoSVG()">Export as SVG</button>
+  <button class="secondary" onclick="exportTwoPDF()">Export as Vector PDF</button>
+  <button class="secondary" onclick="exportDiffCSV()">Download Difference Matrix (CSV)</button>
+`;
+let matA=null, matB=null;
+$('fileA').addEventListener('change',e=>{ if(e.target.files[0]) loadFile(e.target.files[0],csv=>{ matA=parseMatrix(csv); render(); }); });
+$('fileB').addEventListener('change',e=>{ if(e.target.files[0]) loadFile(e.target.files[0],csv=>{ matB=parseMatrix(csv); render(); }); });
+['subOrder','twoUnit','twoW','twoH','twoGap'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
+function sampleMatrix(n,seedBias){
+  const m=[]; for(let i=0;i<n;i++){ m.push([]); for(let j=0;j<n;j++){ const d=Math.abs(i-j); let v=Math.exp(-d/8)*(1-2*((i+j+seedBias)%7===0?0.6:0)); if(d===0) v=1; m[i].push(Math.max(-1,Math.min(1,v+(Math.random()-0.5)*0.08))); } }
+  return m;
+}
+function loadTwoSample(){ matA=sampleMatrix(41,0); matB=sampleMatrix(41,3); render(); }
+function currentDiffTwo(){ if(!matA||!matB) return null; return $('subOrder').value==='AB'?diffMatrix(matA,matB):diffMatrix(matB,matA); }
+function buildTwoSVG(){
+  if(!tickPal) initRoles();
+  const unit=$('twoUnit').value, wPx=physicalToPx($('twoW').value,unit), hPx=physicalToPx($('twoH').value,unit), gapPx=physicalToPx($('twoGap').value,unit);
+  const W=wPx*3+gapPx*2+40, H=hPx+40;
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`;
+  if(!matA||!matB){ svg+='</svg>'; return svg; }
+  const fontA=roleFontAttrs('tick'), fontB=roleFontAttrs('title'), tickCol=roleColor('tick',tickPal,'#333'), titleCol=roleColor('title',titlePal,'#1c2330');
+  const cmap=currentCmap(), cutoff=parseFloat($('cutoff').value)||0.2, posC=diffPosPal.get().color, negC=diffNegPal.get().color;
+  const tickStep=parseInt($('tickStep').value)||10, tickPad=parseFloat($('tickPad').value)||6, startRes=parseInt($('startRes').value)||1;
+  const diff=currentDiffTwo();
+  const y=20;
+  svg+=drawHeatmap(matA,20,y,wPx,hPx,'File A','raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  svg+=drawHeatmap(matB,20+wPx+gapPx,y,wPx,hPx,'File B','raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  svg+=drawHeatmap(diff,20+2*(wPx+gapPx),y,wPx,hPx,'Difference','diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  svg+='</svg>'; return svg;
+}
+function exportTwoSVG(){ const div=document.createElement('div'); div.innerHTML=buildTwoSVG(); downloadSVG(div.querySelector('svg'),'dccm-comparison.svg'); }
+function exportTwoPDF(){ const div=document.createElement('div'); div.innerHTML=buildTwoSVG(); const svgEl=div.querySelector('svg');
+  exportVectorPDF(svgEl, parseFloat(svgEl.getAttribute('width'))/96, parseFloat(svgEl.getAttribute('height'))/96, 'dccm-comparison.pdf'); }
+function exportDiffCSV(){ const diff=currentDiffTwo(); if(!diff) return; downloadText(matrixToCSV(diff,parseInt($('startRes').value)||1),'dccm-difference.csv'); }
+
+/* ============================= TAB 2: MULTI-FILE GRID ============================= */
+$('gridUI').innerHTML = `
+  <h2>Files (grouped into rows)</h2>
+  <div class="hint">Files fill rows in upload order. Within each row, the first file is the baseline; every other file in that row gets its own difference panel (file \u2212 baseline).</div>
+  <input type="file" id="mgFiles" accept=".csv,.tsv,.xlsx,.xls" multiple>
+  <button class="ghost" onclick="loadGridSample()">Load 6-File Sample</button>
+  <div id="mgFileList"></div>
+  <h2>Grid Layout</h2>
+  <div class="box">
+    <div class="row"><div><label>Raw plots per row</label><input id="mgRawPerRow" type="number" value="3" min="1"></div>
+      <div><label>Diff plots per row</label><input id="mgDiffPerRow" type="number" value="2" min="1"></div></div>
+    <div class="row"><div><label>Unit</label><select id="mgUnit"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select></div>
+      <div><label>Panel Width</label><input id="mgW" type="number" value="6" step="0.1"></div>
+      <div><label>Panel Height</label><input id="mgH" type="number" value="6" step="0.1"></div></div>
+    <div class="row"><div><label>Column Gap</label><input id="mgColGap" type="number" value="0.4" step="0.1"></div>
+      <div><label>Row Gap</label><input id="mgRowGap" type="number" value="0.6" step="0.1"></div></div>
+    <label>Gap between raw grid and difference grid</label><input id="mgSectionGap" type="number" value="1" step="0.1">
+  </div>
+  <h2>Export</h2>
+  <button class="secondary" onclick="exportGridSVG()">Export as SVG</button>
+  <button class="secondary" onclick="exportGridPDF()">Export as Vector PDF</button>
+  <button class="secondary" onclick="exportAllDiffCSV()">Download All Difference Matrices (CSV)</button>
+`;
+let mgFiles=[];
+$('mgFiles').addEventListener('change', e=>{
+  [...e.target.files].forEach(f=>{ loadFile(f, csv=>{ mgFiles.push({name:f.name.replace(/\.[^.]+$/,''), label:f.name.replace(/\.[^.]+$/,''), matrix:parseMatrix(csv)}); renderMgList(); render(); }); });
+});
+function removeMgFile(i){ mgFiles.splice(i,1); renderMgList(); render(); }
+function renderMgList(){
+  const c=$('mgFileList'); c.innerHTML='';
+  mgFiles.forEach((f,i)=>{
+    const d=document.createElement('div'); d.className='dsEntry';
+    d.innerHTML=`<div class="row"><div><input value="${f.label}" onchange="mgFiles[${i}].label=this.value;render()"></div>
+      <div style="max-width:60px;text-align:right"><span class="del" onclick="removeMgFile(${i})" style="cursor:pointer;color:#c0392b">\u2715</span></div></div>`;
+    c.appendChild(d);
+  });
+}
+function loadGridSample(){
+  mgFiles=[];
+  const chains=['TBK1c','TBK1d'], conds=['WT-WT','WT-E696K','E696K-WT'];
+  chains.forEach((ch,ci)=> conds.forEach((cn,cni)=>{ mgFiles.push({name:ch+'-'+cn, label:cn, matrix:sampleMatrix(41, ci*10+cni*3)}); }));
+  renderMgList(); render();
+}
+['mgRawPerRow','mgDiffPerRow','mgUnit','mgW','mgH','mgColGap','mgRowGap','mgSectionGap'].forEach(id=>{
+  $(id).addEventListener('input',render); $(id).addEventListener('change',render);
+});
+function computeDiffPanels(){
+  const perRow=parseInt($('mgRawPerRow').value)||3;
+  const diffs=[];
+  for(let g=0; g*perRow<mgFiles.length; g++){
+    const group=mgFiles.slice(g*perRow,(g+1)*perRow);
+    if(group.length<2) continue;
+    const base=group[0];
+    for(let i=1;i<group.length;i++) diffs.push({label:group[i].label+' \u2212 '+base.label, matrix:diffMatrix(group[i].matrix,base.matrix)});
+  }
+  return diffs;
+}
+function buildGridSVG(){
+  if(!tickPal) initRoles();
+  const unit=$('mgUnit').value, wPx=physicalToPx($('mgW').value,unit), hPx=physicalToPx($('mgH').value,unit);
+  const colGap=physicalToPx($('mgColGap').value,unit), rowGap=physicalToPx($('mgRowGap').value,unit), sectionGap=physicalToPx($('mgSectionGap').value,unit);
+  const rawPerRow=Math.max(parseInt($('mgRawPerRow').value)||3,1), diffPerRow=Math.max(parseInt($('mgDiffPerRow').value)||2,1);
+  const rawRows=Math.max(Math.ceil(mgFiles.length/rawPerRow),1);
+  const diffs=computeDiffPanels();
+  const diffRows=Math.max(Math.ceil(diffs.length/diffPerRow),1);
+  const cols=Math.max(rawPerRow,diffPerRow);
+  const W=cols*wPx+(cols-1)*colGap+40;
+  const rawH=rawRows*hPx+(rawRows-1)*rowGap;
+  const diffH=diffRows*hPx+(diffRows-1)*rowGap;
+  const H=rawH+sectionGap+diffH+40;
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`;
+  if(!mgFiles.length){ svg+='</svg>'; return svg; }
+  const fontA=roleFontAttrs('tick'), fontB=roleFontAttrs('title'), tickCol=roleColor('tick',tickPal,'#333'), titleCol=roleColor('title',titlePal,'#1c2330');
+  const cmap=currentCmap(), cutoff=parseFloat($('cutoff').value)||0.2, posC=diffPosPal.get().color, negC=diffNegPal.get().color;
+  const tickStep=parseInt($('tickStep').value)||10, tickPad=parseFloat($('tickPad').value)||6, startRes=parseInt($('startRes').value)||1;
+  mgFiles.forEach((f,i)=>{
+    const r=Math.floor(i/rawPerRow), c=i%rawPerRow;
+    const x=20+c*(wPx+colGap), y=20+r*(hPx+rowGap);
+    svg+=drawHeatmap(f.matrix,x,y,wPx,hPx,f.label,'raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  });
+  const diffY0=20+rawH+sectionGap;
+  diffs.forEach((d,i)=>{
+    const r=Math.floor(i/diffPerRow), c=i%diffPerRow;
+    const x=20+c*(wPx+colGap), y=diffY0+r*(hPx+rowGap);
+    svg+=drawHeatmap(d.matrix,x,y,wPx,hPx,d.label,'diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  });
+  svg+='</svg>'; return svg;
+}
+function exportGridSVG(){ const div=document.createElement('div'); div.innerHTML=buildGridSVG(); downloadSVG(div.querySelector('svg'),'dccm-grid.svg'); }
+function exportGridPDF(){ const div=document.createElement('div'); div.innerHTML=buildGridSVG(); const svgEl=div.querySelector('svg');
+  exportVectorPDF(svgEl, parseFloat(svgEl.getAttribute('width'))/96, parseFloat(svgEl.getAttribute('height'))/96, 'dccm-grid.pdf'); }
+function exportAllDiffCSV(){
+  const diffs=computeDiffPanels(); if(!diffs.length) return;
+  const startRes=parseInt($('startRes').value)||1;
+  diffs.forEach(d=> downloadText(matrixToCSV(d.matrix,startRes), 'diff-'+d.label.replace(/[^a-z0-9]+/gi,'_')+'.csv'));
+}
+
+/* ============================= common ============================= */
+function switchTab(t){ mode=t; $('tabTwo').classList.toggle('active',t==='two'); $('tabGrid').classList.toggle('active',t==='grid');
+  $('twoUI').style.display=t==='two'?'block':'none'; $('gridUI').style.display=t==='grid'?'block':'none'; render(); }
+let mode='two';
+function render(){ $('svgHost').innerHTML = mode==='two' ? buildTwoSVG() : buildGridSVG(); }
+loadTwoSample(); loadGridSample(); mode='two'; render();
+</script>
+</body>
+</html>

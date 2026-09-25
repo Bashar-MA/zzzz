@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis Plots</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/svg2pdf.js/2.2.3/svg2pdf.umd.min.js"></script>
+<style>
+  :root{--ink:#1c2330;--line:#d8dee8;--panel:#fbfcfe;--accent:#2f5fd6;--muted:#69728a;--bg:#eef1f6;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);
+       display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px;}
+  #nav{flex:0 0 auto;display:flex;gap:16px;align-items:center;padding:8px 16px;background:#1c2330;color:#fff;font-size:12px;}
+  #nav a{color:#cdd6ea;text-decoration:none;} #nav a.active{color:#fff;font-weight:700;}
+  #main{flex:1;display:flex;overflow:hidden;}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 8px;}
+  h2:first-child{margin-top:0;}
+  #panel{width:370px;flex:0 0 370px;background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow-y:auto;}
+  #canvasWrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;}
+  label{display:block;font-size:11px;color:var(--muted);margin:6px 0 3px;}
+  input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;background:#fff;color:var(--ink);font-family:inherit;}
+  textarea{height:80px;resize:vertical;font-family:monospace;font-size:11px;}
+  .row{display:flex;gap:8px;} .row>div{flex:1;}
+  button{width:100%;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;}
+  button.secondary{background:#3a4256;} button.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent);}
+  .box{border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px;background:#fff;}
+  .check{display:flex;align-items:center;gap:6px;margin:6px 0;} .check input{width:auto;}
+  .tabs{display:flex;gap:4px;margin-bottom:10px;} .tabs button{margin:0;background:#e4e8ef;color:var(--ink);}
+  .tabs button.active{background:var(--accent);color:#fff;}
+  .item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:6px;font-size:11px;background:#fff;}
+  .item .swatch{width:12px;height:12px;border-radius:3px;flex:0 0 12px;}
+  .item .txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .item .del{cursor:pointer;color:#c0392b;font-weight:700;}
+  .seriesBox{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;}
+  #svgHost{background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px;}
+  #svgHost svg{max-width:100%;height:auto;}
+  .palette{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:4px;}
+  .sw{aspect-ratio:1;border-radius:3px;font-size:8px;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;text-shadow:0 0 2px rgba(0,0,0,.7);}
+  .sw.sel{border-color:#1c2330;}
+  .palNum{display:flex;gap:6px;align-items:center;margin-top:4px;} .palNum input{width:60px;} .palNum span{font-size:10px;color:var(--muted);}
+  .hint{font-size:10px;color:var(--muted);margin-top:4px;}
+  .subh{font-size:11px;font-weight:700;margin-top:10px;color:var(--ink);}
+</style>
+</head>
+<body>
+<div id="nav"><span style="font-weight:700">Figure Tools</span><a href="index.html">Home</a><a href="timeline.html">Timeline Diagram</a><a href="domains.html">Protein Domain Map</a><a href="plots.html" class="active">Analysis Plots</a><a href="multipanel.html">Multi-Panel Layout</a><a href="dccm.html">DCCM Heatmaps</a></div>
+<div id="main">
+<div id="panel">
+  <div class="tabs">
+    <button id="tabViolin" class="active" onclick="switchTab('violin')">Violin</button>
+    <button id="tabDensity" onclick="switchTab('density')">Density</button>
+    <button id="tabLine" onclick="switchTab('line')">Line</button>
+  </div>
+
+  <h2>Data</h2>
+  <div id="dataHint" class="hint"></div>
+  <textarea id="dataText" placeholder="Paste CSV or tab-separated data, first row = headers"></textarea>
+  <div class="row" style="margin-top:6px"><div><input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.xls"></div></div>
+  <div class="row" style="margin-top:6px"><div><button class="ghost" onclick="loadSample()">Load Sample Data</button></div><div><button onclick="parseInput()">Parse / Update</button></div></div>
+
+  <h2>Series / Groups</h2>
+  <div id="seriesList"></div>
+
+  <div id="regionSection" style="display:none">
+    <h2>Region Annotations</h2>
+    <div class="row"><div><input id="rStart" placeholder="Start"></div><div><input id="rEnd" placeholder="End"></div></div>
+    <input id="rLabel" placeholder="Label (e.g. Sheet)" style="margin-top:6px">
+    <div id="pal-region" style="margin-top:6px"></div>
+    <button onclick="addRegion()">Add Region</button>
+    <div id="regionList"></div>
+  </div>
+
+  <h2>Plot Size</h2>
+  <div class="box">
+    <div class="row"><div><label>Width</label><input id="plotW" type="number" value="18" step="0.1"></div>
+      <div><label>Height</label><input id="plotH" type="number" value="11" step="0.1"></div>
+      <div><label>Unit</label><select id="plotUnit"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select></div></div>
+  </div>
+
+  <h2>Axes</h2>
+  <div class="box">
+    <div class="row"><div><label>X Axis Label</label><input id="xLabel"></div><div><label>Y Axis Label</label><input id="yLabel"></div></div>
+    <div class="subh">Y Axis</div>
+    <div class="row"><div><label>Start</label><input id="yStart" type="number"></div><div><label>End</label><input id="yEnd" type="number"></div><div><label>Ticks</label><input id="yTicks" type="number" value="6" min="2"></div></div>
+    <label>Space: axis \u2192 tick labels (px)</label><input id="yPad" type="number" value="8" min="0">
+    <div id="xAxisBox">
+      <div class="subh">X Axis</div>
+      <div id="xOffsetBox" style="display:none"><label>Renumber residues: add offset to X values</label><input id="xOffset" type="number" value="0"></div>
+      <div class="row"><div><label>Start</label><input id="xStart" type="number"></div><div><label>End</label><input id="xEnd" type="number"></div><div><label>Ticks</label><input id="xTicks" type="number" value="6" min="2"></div></div>
+      <label>Space: axis \u2192 tick labels (px)</label><input id="xPad" type="number" value="8" min="0">
+    </div>
+    <div id="binsBox" style="display:none;margin-top:6px"><label>Histogram Bins</label><input id="binCount" type="number" value="20" min="4" max="60"></div>
+    <div class="check"><input id="legendOn" type="checkbox" checked><label style="margin:0">Show series legend</label></div>
+    <div id="legendPosBox" class="row" style="margin-top:6px">
+      <div><label>Legend Position</label><select id="legendPos">
+        <option value="top-left">Top Left</option><option value="top-right">Top Right</option>
+        <option value="bottom-left">Bottom Left</option><option value="bottom-right">Bottom Right</option>
+      </select></div>
+      <div><label>Layout</label><select id="legendLayout"><option value="vertical">Stacked</option><option value="horizontal">Row</option></select></div>
+    </div>
+  </div>
+
+  <div id="violinLegendSection" class="box">
+    <div class="subh" style="margin-top:0">Violin Legend (25\u201375%, IQR, Mean)</div>
+    <div class="check"><input id="vlOn" type="checkbox" checked><label style="margin:0">Show</label></div>
+    <div class="row"><div><label>Position</label><select id="vlPos">
+      <option value="top-right">Top Right</option><option value="top-left">Top Left</option>
+      <option value="bottom-right">Bottom Right</option><option value="bottom-left">Bottom Left</option>
+    </select></div>
+    <div><label>Layout</label><select id="vlLayout"><option value="vertical">Stacked (1 column)</option><option value="horizontal">Row (3 columns)</option></select></div></div>
+    <label>Spacing between items (px)</label><input id="vlGap" type="number" value="8" min="0">
+    <div class="row" style="margin-top:6px"><div><input id="vlText1" value="25%~75%"></div><div><input id="vlText2" value="Range within 1.5 IQR"></div></div>
+    <input id="vlText3" value="Mean" style="margin-top:6px">
+  </div>
+
+  <h2>Fonts</h2>
+  <div class="box" id="fontTick"></div>
+  <div class="box" id="fontTitle"></div>
+  <div class="box" id="fontLegend"></div>
+
+  <h2>Export</h2>
+  <div class="box">
+    <button class="secondary" onclick="exportSVG()">Export as SVG</button>
+    <button class="secondary" onclick="exportPDF()">Export as Vector PDF (editable in Illustrator)</button>
+  </div>
+</div>
+<div id="canvasWrap"><div id="svgHost"></div></div>
+</div>
+<script>
+function hsl2hex(h,s,l){
+  s/=100; l/=100;
+  const k=n=>(n+h/30)%12;
+  const a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  const toHex=x=>Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+const PALETTE = Array.from({length:40},(_,i)=>hsl2hex(Math.round(i*9),65,50));
+
+function physicalToPx(value, unit){
+  const perInch = 96;
+  const factor = unit==='cm' ? perInch/2.54 : unit==='mm' ? perInch/25.4 : unit==='in' ? perInch : 1;
+  return (parseFloat(value)||0) * factor;
+}
+function stepTicks(start,end,step,intOnly){
+  start=parseFloat(start); end=parseFloat(end); step=Math.abs(parseFloat(step))||1;
+  if(isNaN(start)||isNaN(end)) return [];
+  const ticks=[];
+  for(let v=Math.min(start,end); v<=Math.max(start,end)+1e-9; v+=step) ticks.push(intOnly?Math.round(v):Math.round(v*1000)/1000);
+  return start<=end?ticks:ticks.reverse();
+}
+function linTicks(start,end,count){
+  if(count<2) count=2;
+  const arr=[];
+  for(let i=0;i<count;i++) arr.push(start+i*(end-start)/(count-1));
+  const range=Math.abs(end-start)||1;
+  const decimals=Math.max(0, 2-Math.floor(Math.log10(range)));
+  return arr.map(v=>parseFloat(v.toFixed(decimals)));
+}
+
+function defaultColIdx(i){ return ((i*7+5)%40)+1; }
+function makeColConfig(headers, startIdx){
+  startIdx = startIdx||0;
+  const cfg=[];
+  for(let i=startIdx;i<headers.length;i++){
+    const idx=defaultColIdx(i);
+    cfg.push({label:headers[i]||('Series '+i), colorIdx:idx, color:PALETTE[idx-1], visible:true, colIndex:i, width:2, dash:false});
+  }
+  return cfg;
+}
+function renderColConfigList(container, cfgArr, onChange, showLineExtras){
+  container.innerHTML='';
+  cfgArr.forEach((s)=>{
+    const div=document.createElement('div'); div.className='seriesBox';
+    div.innerHTML = `<div class="check"><input type="checkbox" ${s.visible?'checked':''} data-role="vis"><label style="margin:0">Show in plot</label></div>
+      <input value="${s.label}" data-role="label" style="margin-top:4px">
+      <div data-role="pal" style="margin-top:6px"></div>` +
+      (showLineExtras? `<div class="row" style="margin-top:6px"><div><input type="number" value="${s.width}" min="1" data-role="width"></div>
+        <div><select data-role="dash"><option value="solid">Solid</option><option value="dashed" ${s.dash?'selected':''}>Dashed</option></select></div></div>`:'');
+    container.appendChild(div);
+    div.querySelector('[data-role=vis]').onchange=e=>{ s.visible=e.target.checked; onChange(); };
+    div.querySelector('[data-role=label]').onchange=e=>{ s.label=e.target.value; onChange(); };
+    if(showLineExtras){
+      div.querySelector('[data-role=width]').onchange=e=>{ s.width=parseFloat(e.target.value); onChange(); };
+      div.querySelector('[data-role=dash]').onchange=e=>{ s.dash=e.target.value==='dashed'; onChange(); };
+    }
+    createPalette(div.querySelector('[data-role=pal]'), s.colorIdx, (color,idx)=>{ s.color=color; s.colorIdx=idx; onChange(); });
+  });
+}
+function fontRoleHTML(role,title){
+  return `<div class="subh">${title}</div>
+    <div class="row"><div><label>Family</label><select id="${role}Family">
+      <option value="Arial, Helvetica, sans-serif">Arial</option>
+      <option value="Georgia, serif">Georgia</option>
+      <option value="'Times New Roman', serif">Times New Roman</option>
+      <option value="'Courier New', monospace">Courier New</option>
+      <option value="Verdana, sans-serif">Verdana</option>
+    </select></div>
+    <div><label>Style</label><select id="${role}Style"><option value="normal">Normal</option><option value="italic">Italic</option><option value="bold">Bold</option><option value="bolditalic">Bold Italic</option></select></div></div>
+    <div class="row" style="margin-top:6px"><div><label>Size</label><input id="${role}Size" type="number" value="13"></div>
+    <div><label>Color</label><select id="${role}ColorMode">${role==='legend'?'<option value="match">Match series/group</option>':''}<option value="default">Default</option><option value="custom">Custom</option></select></div></div>
+    <div id="${role}ColorBox" style="display:none"><div id="pal-${role}"></div></div>`;
+}
+function initFontRole(role, onChange){
+  ['Family','Style','Size'].forEach(k=>{ const el=document.getElementById(role+k); el.addEventListener('input',onChange); el.addEventListener('change',onChange); });
+  const modeEl=document.getElementById(role+'ColorMode');
+  modeEl.addEventListener('change',()=>{ document.getElementById(role+'ColorBox').style.display = modeEl.value==='custom'?'block':'none'; onChange(); });
+  return createPalette(document.getElementById('pal-'+role), 1, onChange);
+}
+function roleFontAttrs(role){
+  return fontAttrs(document.getElementById(role+'Family').value, document.getElementById(role+'Style').value, document.getElementById(role+'Size').value);
+}
+function roleColor(role, pal, fallbackDefault, matchColor){
+  const mode=document.getElementById(role+'ColorMode').value;
+  if(mode==='match') return matchColor!==undefined?matchColor:fallbackDefault;
+  if(mode==='custom') return pal.get().color;
+  return fallbackDefault;
+}
+
+function drawLegend(items, cfg){
+  const {position,layout,gap,ml,mr,mt,mb,W,H} = cfg;
+  const horiz = layout==='horizontal';
+  const rowH=18;
+  const widths = items.map(it=> 24 + it.label.length*6.5);
+  const totalW = horiz ? widths.reduce((a,b)=>a+b+gap,0)-gap : Math.max(...widths,60);
+  const totalH = horiz ? rowH : items.length*rowH + (items.length-1)*gap;
+  const x0 = position.includes('left') ? ml+12 : W-mr-12-totalW;
+  const y0 = position.includes('top') ? mt+16 : H-mb-16-totalH;
+  let s='', cx=x0;
+  items.forEach((it,i)=>{
+    const ix = horiz? cx : x0;
+    const iy = horiz? y0 : y0+i*(rowH+gap);
+    if(it.type==='line') s+=`<line x1="${ix}" y1="${iy+8}" x2="${ix+16}" y2="${iy+8}" stroke="${it.color}" stroke-width="${it.width||2}" ${it.dash?'stroke-dasharray="6,4"':''}/>`;
+    else if(it.type==='box') s+=`<rect x="${ix}" y="${iy+3}" width="14" height="10" fill="${it.color}"/>`;
+    else if(it.type==='dot') s+=`<rect x="${ix+5}" y="${iy+5}" width="6" height="6" fill="${it.color}"/>`;
+    else s+=`<rect x="${ix}" y="${iy+2}" width="12" height="12" fill="${it.color}" fill-opacity="${it.opacity!==undefined?it.opacity:0.6}" stroke="${it.color}"/>`;
+    s+=`<text x="${ix+20}" y="${iy+13}" ${it.font} fill="${it.textColor}">${escXml(it.label)}</text>`;
+    if(horiz) cx += widths[i]+gap;
+  });
+  return s;
+}
+
+async function exportVectorPDF(svgEl, wIn, hIn, filename){
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF({unit:'in', format:[wIn,hIn]});
+  await pdf.svg(svgEl,{x:0,y:0,width:wIn,height:hIn});
+  pdf.save(filename);
+}
+
+function createPalette(container, initialIdx, onChange){
+  let idx = initialIdx||1;
+  function draw(){
+    container.innerHTML = '<div class="palette">'+PALETTE.map((c,i)=>`<div class="sw${i+1===idx?' sel':''}" style="background:${c}" data-i="${i+1}">${i+1}</div>`).join('')+
+      '</div><div class="palNum"><input type="number" min="1" max="40" value="'+idx+'"><span>type 1\u201340</span></div>';
+    container.querySelectorAll('.sw').forEach(el=>el.onclick=()=>{idx=parseInt(el.dataset.i);draw();onChange(PALETTE[idx-1],idx);});
+    container.querySelector('input').onchange=e=>{idx=Math.max(1,Math.min(40,parseInt(e.target.value)||1));draw();onChange(PALETTE[idx-1],idx);};
+  }
+  draw();
+  return {get:()=>({color:PALETTE[idx-1],idx}), set:(i)=>{idx=i;draw();}};
+}
+
+function parseDelimited(text){
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim().length);
+  if(!lines.length) return {headers:[],cols:[]};
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+  const headers = lines[0].split(delim).map(h=>h.trim());
+  const cols = headers.map(()=>[]);
+  for(let i=1;i<lines.length;i++){
+    const cells = lines[i].split(delim);
+    cells.forEach((c,j)=>{ if(j<cols.length){ const v=parseFloat(c); if(!isNaN(v)) cols[j].push(v); } });
+  }
+  return {headers,cols};
+}
+
+function loadFile(file, cb){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const sheet=wb.Sheets[wb.SheetNames[0]];
+      cb(XLSX.utils.sheet_to_csv(sheet));
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader=new FileReader();
+    reader.onload=e=>cb(e.target.result);
+    reader.readAsText(file);
+  }
+}
+
+function niceTicks(min,max,count){
+  if(min===max){min-=1;max+=1;}
+  const raw=(max-min)/count, mag=Math.pow(10,Math.floor(Math.log10(raw))), norm=raw/mag;
+  const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag;
+  const start=Math.ceil(min/step)*step;
+  const ticks=[];
+  for(let v=start; v<=max+1e-9; v+=step) ticks.push(Math.round(v*1000)/1000);
+  return ticks;
+}
+
+function quartileStats(arr){
+  const a=[...arr].sort((x,y)=>x-y); const n=a.length;
+  const q=(p)=>{ const idx=p*(n-1); const lo=Math.floor(idx), hi=Math.ceil(idx); return a[lo]+(a[hi]-a[lo])*(idx-lo); };
+  const q1=q(0.25), median=q(0.5), q3=q(0.75), iqr=q3-q1;
+  const loW=Math.max(a[0], q1-1.5*iqr), hiW=Math.min(a[n-1], q3+1.5*iqr);
+  const mean=a.reduce((s,v)=>s+v,0)/n;
+  return {q1,median,q3,iqr,loW,hiW,mean,min:a[0],max:a[n-1],n};
+}
+
+function gaussianKDE(data, points, bandwidth){
+  const n=data.length;
+  return points.map(x=>{
+    let s=0;
+    for(const d of data){ const u=(x-d)/bandwidth; s+=Math.exp(-0.5*u*u); }
+    return s/(n*bandwidth*Math.sqrt(2*Math.PI));
+  });
+}
+function silvermanBW(data){
+  const n=data.length, mean=data.reduce((a,b)=>a+b,0)/n;
+  const sd=Math.sqrt(data.reduce((a,b)=>a+(b-mean)**2,0)/(n-1))||1;
+  return 1.06*sd*Math.pow(n,-0.2) || 1;
+}
+
+function fontAttrs(family,styleMode,size){
+  let style='normal',weight='normal';
+  if(styleMode==='italic') style='italic';
+  else if(styleMode==='bold') weight='bold';
+  else if(styleMode==='bolditalic'){style='italic';weight='bold';}
+  return `font-family="${family}" font-style="${style}" font-weight="${weight}" font-size="${size}"`;
+}
+function escXml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function downloadSVG(svgEl, filename){
+  const blob=new Blob([svgEl.outerHTML],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+</script>
+<script>
+function $(id){return document.getElementById(id);}
+let mode='violin';
+let table={headers:[],cols:[]};
+let seriesConfig=[];
+let regions=[];
+let regionPal, tickPal, titlePal, legendPal;
+
+$('fontTick').innerHTML = fontRoleHTML('tick','Axis Tick Numbers');
+$('fontTitle').innerHTML = fontRoleHTML('title','Axis Titles');
+$('fontLegend').innerHTML = fontRoleHTML('legend','Legend / Category Labels');
+
+function switchTab(m){
+  mode=m;
+  ['Violin','Density','Line'].forEach(t=>$('tab'+t).classList.toggle('active', t.toLowerCase()===m));
+  $('regionSection').style.display = m==='line' ? 'block':'none';
+  $('binsBox').style.display = m==='density' ? 'block':'none';
+  $('violinLegendSection').style.display = m==='violin' ? 'block':'none';
+  $('legendPosBox').style.display = m==='violin' ? 'none':'flex';
+  $('xAxisBox').style.display = m==='violin' ? 'none':'block';
+  $('xOffsetBox').style.display = m==='line' ? 'block':'none';
+  $('dataHint').textContent = m==='line'
+    ? 'Column 1 = X values (e.g. residue number); remaining columns = one line series each.'
+    : 'Each column = one group\u2019s sample values (any length). First row = group names.';
+  buildSeriesConfig();
+  autofillAxes();
+  render();
+}
+
+['xLabel','yLabel','yStart','yEnd','yTicks','yPad','xStart','xEnd','xTicks','xPad','xOffset','binCount','legendOn','legendPos','legendLayout',
+ 'plotW','plotH','plotUnit','vlOn','vlPos','vlLayout','vlGap','vlText1','vlText2','vlText3'].forEach(id=>{
+  $(id).addEventListener('input',render); $(id).addEventListener('change',render);
+});
+
+$('fileInput').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  loadFile(f, csv=>{ $('dataText').value=csv; parseInput(); });
+});
+
+function parseInput(){ table = parseDelimited($('dataText').value); buildSeriesConfig(); autofillAxes(); render(); }
+
+function buildSeriesConfig(){
+  const startIdx = mode==='line' ? 1 : 0;
+  seriesConfig = [];
+  for(let i=startIdx;i<table.headers.length;i++){
+    const idx = ((i*7+5) % 40)+1;
+    seriesConfig.push({label:table.headers[i]||('Series '+i), colorIdx:idx, color:PALETTE[idx-1], width:2, dash:false, visible:true, colIndex:i});
+  }
+  renderSeriesList();
+}
+function renderSeriesList(){
+  const c=$('seriesList'); c.innerHTML='';
+  seriesConfig.forEach((s,i)=>{
+    const div=document.createElement('div'); div.className='seriesBox';
+    div.innerHTML = `<div class="check"><input type="checkbox" ${s.visible?'checked':''} onchange="seriesConfig[${i}].visible=this.checked;render()"><label style="margin:0">Show in plot</label></div>
+      <label>Legend Label</label><input value="${s.label}" onchange="seriesConfig[${i}].label=this.value;render()">
+      <div id="palS${i}" style="margin-top:6px"></div>` +
+      (mode==='line' ? `<div class="row" style="margin-top:6px"><div><label>Line Width</label><input type="number" value="${s.width}" min="1" onchange="seriesConfig[${i}].width=parseFloat(this.value);render()"></div>
+        <div><label>Style</label><select onchange="seriesConfig[${i}].dash=this.value==='dashed';render()"><option value="solid">Solid</option><option value="dashed" ${s.dash?'selected':''}>Dashed</option></select></div></div>` : '');
+    c.appendChild(div);
+    createPalette($('palS'+i), s.colorIdx, (color,idx)=>{ seriesConfig[i].color=color; seriesConfig[i].colorIdx=idx; render(); });
+  });
+}
+function addRegion(){
+  const s=parseFloat($('rStart').value), e=parseFloat($('rEnd').value);
+  if(isNaN(s)||isNaN(e)) return;
+  const c = regionPal.get();
+  regions.push({start:s,end:e,label:$('rLabel').value||'',color:c.color});
+  $('rStart').value='';$('rEnd').value='';$('rLabel').value='';
+  render();
+}
+function removeRegion(i){ regions.splice(i,1); render(); }
+function renderRegionList(){
+  const c=$('regionList'); c.innerHTML='';
+  regions.forEach((r,i)=>{
+    const div=document.createElement('div'); div.className='item';
+    div.innerHTML=`<div class="swatch" style="background:${r.color}"></div><div class="txt">${r.start}-${r.end}${r.label?' ('+r.label+')':''}</div><div class="del" onclick="removeRegion(${i})">\u2715</div>`;
+    c.appendChild(div);
+  });
+}
+function randn(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+function loadSample(){
+  if(mode==='line'){
+    const heads=['Residue','Wild','T46I','P56H','P56S']; let rows=[heads.join(',')];
+    for(let i=1;i<=130;i++){
+      const base = 8*Math.exp(-i/8)+1+0.3*Math.abs(randn());
+      const bump = (i>70&&i<95) ? 2.5*Math.exp(-((i-82)**2)/60) : 0;
+      const vals=[i]; ['Wild','T46I','P56H','P56S'].forEach((g,gi)=>{ vals.push((base+bump*(0.7+0.3*gi%2)+0.2*randn()).toFixed(2)); });
+      rows.push(vals.join(','));
+    }
+    $('dataText').value=rows.join('\n');
+  } else {
+    const heads=['Wild','T46I','P56H','P56S'], means=[2.8,2.85,2.95,2.9], n=150;
+    const cols=heads.map((h,gi)=>Array.from({length:n},()=> (means[gi]+0.35*randn()).toFixed(3)));
+    let rows=[heads.join(',')];
+    for(let r=0;r<n;r++) rows.push(cols.map(c=>c[r]).join(','));
+    $('dataText').value=rows.join('\n');
+  }
+  parseInput();
+}
+
+function autofillAxes(){
+  const groups = seriesConfig.map(s=>table.cols[s.colIndex]||[]).filter(a=>a.length);
+  if(!groups.length) return;
+  if(mode==='line'){
+    const xs=(table.cols[0]||[]).map(v=>v+(parseFloat($('xOffset').value)||0));
+    if(xs.length){ $('xStart').value=Math.min(...xs); $('xEnd').value=Math.max(...xs); }
+    const allY=groups.flat(); const pad=(Math.max(...allY)-Math.min(...allY))*0.15||1;
+    $('yStart').value=(Math.min(...allY)-pad).toFixed(2); $('yEnd').value=(Math.max(...allY)+pad*2).toFixed(2);
+  } else if(mode==='violin'){
+    const all=groups.flat(); const pad=(Math.max(...all)-Math.min(...all))*0.15||1;
+    $('yStart').value=(Math.min(...all)-pad).toFixed(2); $('yEnd').value=(Math.max(...all)+pad).toFixed(2);
+  } else {
+    const all=groups.flat();
+    $('xStart').value=Math.min(...all).toFixed(2); $('xEnd').value=Math.max(...all).toFixed(2);
+    $('yStart').value=0; $('yEnd').value='';
+  }
+}
+
+let rolesInit=false;
+function initRoles(){
+  tickPal = initFontRole('tick', render);
+  titlePal = initFontRole('title', render);
+  legendPal = initFontRole('legend', render);
+  rolesInit=true;
+}
+function tf(){ return roleFontAttrs('tick'); }
+function tif(){ return roleFontAttrs('title'); }
+function lf(){ return roleFontAttrs('legend'); }
+function tickColor(){ return roleColor('tick', tickPal, '#333'); }
+function titleColor(){ return roleColor('title', titlePal, '#1c2330'); }
+function legendColor(matchColor){ return roleColor('legend', legendPal, '#1c2330', matchColor); }
+
+function render(){
+  if(!rolesInit) initRoles();
+  renderRegionList();
+  if(!regionPal) regionPal = createPalette($('pal-region'), 1, ()=>render());
+  if(mode==='violin') renderViolin();
+  else if(mode==='density') renderDensity();
+  else renderLine();
+}
+
+function plotDims(){ return {W: physicalToPx($('plotW').value,$('plotUnit').value)||600, H: physicalToPx($('plotH').value,$('plotUnit').value)||400}; }
+function baseSVG(W,H){ return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`; }
+function axisLabels(xLabel,yLabel,W,H,ml,mr,mt,mb){
+  let s=''; const tc=titleColor();
+  if(xLabel) s+=`<text x="${ml+(W-ml-mr)/2}" y="${H-8}" text-anchor="middle" ${tif()} fill="${tc}">${escXml(xLabel)}</text>`;
+  if(yLabel) s+=`<text x="16" y="${mt+(H-mt-mb)/2}" text-anchor="middle" ${tif()} fill="${tc}" transform="rotate(-90 16 ${mt+(H-mt-mb)/2})">${escXml(yLabel)}</text>`;
+  return s;
+}
+function visSeries(){ return seriesConfig.filter(s=>s.visible); }
+function num(id,fallback){ const v=parseFloat($(id).value); return isNaN(v)?fallback:v; }
+
+function renderViolin(){
+  const {W,H}=plotDims(); const ml=64,mr=20,mt=34,mb=64, drawW=W-ml-mr, drawH=H-mt-mb;
+  const groups = visSeries().map(s=>({label:s.label,color:s.color,data:table.cols[s.colIndex]||[]})).filter(g=>g.data.length>1);
+  if(!groups.length){ $('svgHost').innerHTML=baseSVG(W,H)+'</svg>'; return; }
+  const yMin=num('yStart',0), yMax=num('yEnd',1);
+  const yS=v=> mt+drawH-(v-yMin)/(yMax-yMin)*drawH;
+  const slotW=drawW/groups.length;
+  let svg=baseSVG(W,H);
+  svg+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.2"/>`;
+  linTicks(yMin,yMax,parseInt($('yTicks').value)).forEach(t=>{
+    const ty=yS(t);
+    svg+=`<line x1="${ml-4}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/>`;
+    svg+=`<text x="${ml-4-num('yPad',8)}" y="${ty+4}" text-anchor="end" ${tf()} fill="${tickColor()}">${t}</text>`;
+  });
+  groups.forEach((g,i)=>{
+    const cx=ml+slotW*(i+0.5);
+    const bw=silvermanBW(g.data)||1;
+    const pts=Array.from({length:40},(_,k)=>yMin+k*(yMax-yMin)/39);
+    const dens=gaussianKDE(g.data,pts,bw);
+    const maxD=Math.max(...dens)||1;
+    const hw=dens.map(d=> d/maxD*slotW*0.42);
+    let d='';
+    pts.forEach((p,k)=>{ d+= (k===0?'M':'L')+(cx-hw[k])+' '+yS(p)+' '; });
+    for(let k=pts.length-1;k>=0;k--) d+='L'+(cx+hw[k])+' '+yS(pts[k])+' ';
+    d+='Z';
+    svg+=`<path d="${d}" fill="${g.color}" fill-opacity="0.55" stroke="${g.color}" stroke-width="1.5"/>`;
+    const st=quartileStats(g.data);
+    svg+=`<line x1="${cx}" y1="${yS(st.loW)}" x2="${cx}" y2="${yS(st.hiW)}" stroke="#111" stroke-width="1.8"/>`;
+    svg+=`<rect x="${cx-6}" y="${yS(st.q3)}" width="12" height="${yS(st.q1)-yS(st.q3)}" fill="#111"/>`;
+    svg+=`<rect x="${cx-3}" y="${yS(st.mean)-3}" width="6" height="6" fill="#e53935"/>`;
+    svg+=`<text x="${cx}" y="${mt+drawH+22}" text-anchor="middle" ${lf()} fill="${legendColor(g.color)}">${escXml(g.label)}</text>`;
+  });
+  if($('vlOn').checked){
+    const items=[{type:'box',color:'#111',label:$('vlText1').value},{type:'line',color:'#111',label:$('vlText2').value},{type:'dot',color:'#e53935',label:$('vlText3').value}];
+    items.forEach(it=>{it.font=lf(); it.textColor=legendColor('#1c2330');});
+    svg+=drawLegend(items,{position:$('vlPos').value,layout:$('vlLayout').value,gap:parseFloat($('vlGap').value)||8,ml,mr,mt,mb,W,H});
+  }
+  svg+=axisLabels($('xLabel').value,$('yLabel').value,W,H,ml,mr,mt,mb);
+  svg+='</svg>'; $('svgHost').innerHTML=svg;
+}
+
+function renderDensity(){
+  const {W,H}=plotDims(); const ml=64,mr=20,mt=30,mb=54, drawW=W-ml-mr, drawH=H-mt-mb;
+  const groups = visSeries().map(s=>({label:s.label,color:s.color,data:table.cols[s.colIndex]||[]})).filter(g=>g.data.length>1);
+  if(!groups.length){ $('svgHost').innerHTML=baseSVG(W,H)+'</svg>'; return; }
+  const xMin=num('xStart',0), xMax=num('xEnd',1);
+  const bins=parseInt($('binCount').value)||20;
+  const binW=(xMax-xMin)/bins;
+  const hists = groups.map(g=>{
+    const counts=new Array(bins).fill(0);
+    g.data.forEach(v=>{ let b=Math.floor((v-xMin)/binW); if(b>=bins)b=bins-1; if(b<0)b=0; counts[b]++; });
+    return counts.map(c=> c/(g.data.length*binW));
+  });
+  let yMax=num('yEnd',NaN); if(!yMax) yMax=Math.max(...hists.flat())*1.1||1;
+  const xS=v=> ml+(v-xMin)/(xMax-xMin)*drawW;
+  const yS=v=> mt+drawH-(v/yMax)*drawH;
+  let svg=baseSVG(W,H);
+  svg+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.2"/>`;
+  linTicks(xMin,xMax,parseInt($('xTicks').value)).forEach(t=>{
+    const tx=xS(t);
+    svg+=`<line x1="${tx}" y1="${mt+drawH}" x2="${tx}" y2="${mt+drawH+4}" stroke="#222"/>`;
+    svg+=`<text x="${tx}" y="${mt+drawH+4+num('xPad',8)+10}" text-anchor="middle" ${tf()} fill="${tickColor()}">${t}</text>`;
+  });
+  linTicks(0,yMax,parseInt($('yTicks').value)).forEach(t=>{
+    const ty=yS(t);
+    svg+=`<line x1="${ml-4}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/>`;
+    svg+=`<text x="${ml-4-num('yPad',8)}" y="${ty+4}" text-anchor="end" ${tf()} fill="${tickColor()}">${t}</text>`;
+  });
+  groups.forEach((g,gi)=>{
+    let d='M'+xS(xMin)+' '+yS(0)+' ';
+    hists[gi].forEach((h,b)=>{ const x1=xS(xMin+b*binW), x2=xS(xMin+(b+1)*binW); d+=`L${x1} ${yS(h)} L${x2} ${yS(h)} `; });
+    d+='L'+xS(xMax)+' '+yS(0);
+    svg+=`<path d="${d}" fill="${g.color}" fill-opacity="0.15" stroke="${g.color}" stroke-width="1.8"/>`;
+  });
+  if($('legendOn').checked){
+    const items=groups.map(g=>({type:'swatch',color:g.color,label:g.label,opacity:0.5,font:lf(),textColor:legendColor(g.color)}));
+    svg+=drawLegend(items,{position:$('legendPos').value,layout:$('legendLayout').value,gap:6,ml,mr,mt,mb,W,H});
+  }
+  svg+=axisLabels($('xLabel').value,$('yLabel').value,W,H,ml,mr,mt,mb);
+  svg+='</svg>'; $('svgHost').innerHTML=svg;
+}
+
+function renderLine(){
+  const {W,H}=plotDims(); const ml=64,mr=20,mt=30,mb=54, drawW=W-ml-mr, drawH=H-mt-mb;
+  const xs=(table.cols[0]||[]).map(v=>v+(parseFloat($('xOffset').value)||0));
+  const series = visSeries().map(s=>({label:s.label,color:s.color,width:s.width,dash:s.dash,data:table.cols[s.colIndex]||[]})).filter(s=>s.data.length>1);
+  if(!xs.length || !series.length){ $('svgHost').innerHTML=baseSVG(W,H)+'</svg>'; return; }
+  const xMin=num('xStart',0), xMax=num('xEnd',1), yMin=num('yStart',0), yMax=num('yEnd',1);
+  const xS=v=> ml+(v-xMin)/(xMax-xMin)*drawW;
+  const yS=v=> mt+drawH-(v-yMin)/(yMax-yMin)*drawH;
+  let svg=baseSVG(W,H);
+  regions.forEach(r=>{
+    const rx=xS(Math.max(r.start,xMin)), rw=xS(Math.min(r.end,xMax))-rx;
+    if(rw>0) svg+=`<rect x="${rx}" y="${mt}" width="${rw}" height="${drawH}" fill="${r.color}" fill-opacity="0.35"/>`;
+  });
+  svg+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.2"/>`;
+  linTicks(xMin,xMax,parseInt($('xTicks').value)).forEach(t=>{
+    const tx=xS(t);
+    svg+=`<line x1="${tx}" y1="${mt+drawH}" x2="${tx}" y2="${mt+drawH+4}" stroke="#222"/>`;
+    svg+=`<text x="${tx}" y="${mt+drawH+4+num('xPad',8)+10}" text-anchor="middle" ${tf()} fill="${tickColor()}">${t}</text>`;
+  });
+  linTicks(yMin,yMax,parseInt($('yTicks').value)).forEach(t=>{
+    const ty=yS(t);
+    svg+=`<line x1="${ml-4}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/>`;
+    svg+=`<text x="${ml-4-num('yPad',8)}" y="${ty+4}" text-anchor="end" ${tf()} fill="${tickColor()}">${t}</text>`;
+  });
+  series.forEach(s=>{
+    let d='';
+    xs.forEach((xv,i)=>{ if(s.data[i]!==undefined) d+=(d===''?'M':'L')+xS(xv)+' '+yS(s.data[i])+' '; });
+    svg+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width}" ${s.dash?'stroke-dasharray="6,4"':''}/>`;
+  });
+  if($('legendOn').checked){
+    const seen=new Set();
+    const items=series.map(s=>({type:'line',color:s.color,label:s.label,width:s.width,dash:s.dash,font:lf(),textColor:legendColor(s.color)}));
+    regions.forEach(r=>{ if(r.label && !seen.has(r.label)){ seen.add(r.label); items.push({type:'swatch',color:r.color,label:r.label,opacity:0.5,font:lf(),textColor:legendColor('#1c2330')}); } });
+    svg+=drawLegend(items,{position:$('legendPos').value,layout:$('legendLayout').value,gap:6,ml,mr,mt,mb,W,H});
+  }
+  svg+=axisLabels($('xLabel').value,$('yLabel').value,W,H,ml,mr,mt,mb);
+  svg+='</svg>'; $('svgHost').innerHTML=svg;
+}
+
+function exportSVG(){ downloadSVG($('svgHost').querySelector('svg'), mode+'-plot.svg'); }
+function exportPDF(){
+  const svgEl=$('svgHost').querySelector('svg');
+  const wIn = $('plotUnit').value==='in'?parseFloat($('plotW').value): $('plotUnit').value==='cm'?parseFloat($('plotW').value)/2.54:parseFloat($('plotW').value)/25.4;
+  const hIn = $('plotUnit').value==='in'?parseFloat($('plotH').value): $('plotUnit').value==='cm'?parseFloat($('plotH').value)/2.54:parseFloat($('plotH').value)/25.4;
+  exportVectorPDF(svgEl, wIn, hIn, mode+'-plot.pdf');
+}
+
+switchTab('violin');
+loadSample();
+</script>
+</body>
+</html>

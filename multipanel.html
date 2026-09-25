@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Panel Layout</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/svg2pdf.js/2.2.3/svg2pdf.umd.min.js"></script>
+<style>
+  :root{--ink:#1c2330;--line:#d8dee8;--panel:#fbfcfe;--accent:#2f5fd6;--muted:#69728a;--bg:#eef1f6;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);
+       display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px;}
+  #nav{flex:0 0 auto;display:flex;gap:16px;align-items:center;padding:8px 16px;background:#1c2330;color:#fff;font-size:12px;}
+  #nav a{color:#cdd6ea;text-decoration:none;} #nav a.active{color:#fff;font-weight:700;}
+  #main{flex:1;display:flex;overflow:hidden;}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 8px;}
+  h2:first-child{margin-top:0;}
+  #panel{width:400px;flex:0 0 400px;background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow-y:auto;}
+  #canvasWrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;}
+  label{display:block;font-size:11px;color:var(--muted);margin:6px 0 3px;}
+  input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;background:#fff;color:var(--ink);font-family:inherit;}
+  textarea{height:56px;resize:vertical;font-family:monospace;font-size:11px;}
+  .row{display:flex;gap:8px;} .row>div{flex:1;}
+  button{width:100%;padding:8px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;}
+  button.secondary{background:#3a4256;} button.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent);}
+  .box{border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px;background:#fff;}
+  .check{display:flex;align-items:center;gap:6px;margin:6px 0;} .check input{width:auto;}
+  .tabs{display:flex;gap:4px;margin-bottom:10px;} .tabs button{margin:0;background:#e4e8ef;color:var(--ink);}
+  .tabs button.active{background:var(--accent);color:#fff;}
+  .item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:6px;font-size:11px;background:#fff;}
+  .item .txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .item .del{cursor:pointer;color:#c0392b;font-weight:700;}
+  #svgHost{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;}
+  #svgHost svg{max-width:100%;height:auto;}
+  .palette{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:4px;}
+  .sw{aspect-ratio:1;border-radius:3px;font-size:8px;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;text-shadow:0 0 2px rgba(0,0,0,.7);}
+  .sw.sel{border-color:#1c2330;}
+  .palNum{display:flex;gap:6px;align-items:center;margin-top:4px;} .palNum input{width:60px;} .palNum span{font-size:10px;color:var(--muted);}
+  .hint{font-size:10px;color:var(--muted);margin-top:4px;}
+  .subh{font-size:11px;font-weight:700;margin-top:10px;color:var(--ink);}
+  .seriesBox{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;}
+  .plotEntry{border:2px solid var(--accent);border-radius:8px;padding:10px;margin-top:10px;background:#fff;}
+  .dsEntry{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;background:#fff;}
+  .computed{font-size:11px;color:var(--muted);margin-top:6px;}
+  .chkgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+  .chkgrid label{display:flex;align-items:center;gap:3px;font-size:11px;color:var(--ink);margin:0;background:#f2f4f8;padding:3px 6px;border-radius:5px;}
+  .chkgrid input{width:auto;}
+  details{margin-top:8px;} summary{cursor:pointer;font-weight:700;font-size:11px;}
+</style>
+</head>
+<body>
+<div id="nav"><span style="font-weight:700">Figure Tools</span><a href="index.html">Home</a><a href="timeline.html">Timeline Diagram</a><a href="domains.html">Protein Domain Map</a><a href="plots.html">Analysis Plots</a><a href="multipanel.html" class="active">Multi-Panel Layout</a><a href="dccm.html">DCCM Heatmaps</a></div>
+<div id="main">
+<div id="panel">
+  <div class="tabs">
+    <button id="tabGrid" class="active" onclick="switchMode('grid')">Violin + Density Grid</button>
+    <button id="tabStack" onclick="switchMode('stack')">Line Stack</button>
+  </div>
+
+  <div id="gridUI"></div>
+  <div id="stackUI" style="display:none"></div>
+</div>
+<div id="canvasWrap"><div id="svgHost"></div></div>
+</div>
+<script>
+function hsl2hex(h,s,l){
+  s/=100; l/=100;
+  const k=n=>(n+h/30)%12;
+  const a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  const toHex=x=>Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+const PALETTE = Array.from({length:40},(_,i)=>hsl2hex(Math.round(i*9),65,50));
+
+function physicalToPx(value, unit){
+  const perInch = 96;
+  const factor = unit==='cm' ? perInch/2.54 : unit==='mm' ? perInch/25.4 : unit==='in' ? perInch : 1;
+  return (parseFloat(value)||0) * factor;
+}
+function stepTicks(start,end,step,intOnly){
+  start=parseFloat(start); end=parseFloat(end); step=Math.abs(parseFloat(step))||1;
+  if(isNaN(start)||isNaN(end)) return [];
+  const ticks=[];
+  for(let v=Math.min(start,end); v<=Math.max(start,end)+1e-9; v+=step) ticks.push(intOnly?Math.round(v):Math.round(v*1000)/1000);
+  return start<=end?ticks:ticks.reverse();
+}
+function linTicks(start,end,count){
+  if(count<2) count=2;
+  const arr=[];
+  for(let i=0;i<count;i++) arr.push(start+i*(end-start)/(count-1));
+  const range=Math.abs(end-start)||1;
+  const decimals=Math.max(0, 2-Math.floor(Math.log10(range)));
+  return arr.map(v=>parseFloat(v.toFixed(decimals)));
+}
+
+function defaultColIdx(i){ return ((i*7+5)%40)+1; }
+function makeColConfig(headers, startIdx){
+  startIdx = startIdx||0;
+  const cfg=[];
+  for(let i=startIdx;i<headers.length;i++){
+    const idx=defaultColIdx(i);
+    cfg.push({label:headers[i]||('Series '+i), colorIdx:idx, color:PALETTE[idx-1], visible:true, colIndex:i, width:2, dash:false});
+  }
+  return cfg;
+}
+function renderColConfigList(container, cfgArr, onChange, showLineExtras){
+  container.innerHTML='';
+  cfgArr.forEach((s)=>{
+    const div=document.createElement('div'); div.className='seriesBox';
+    div.innerHTML = `<div class="check"><input type="checkbox" ${s.visible?'checked':''} data-role="vis"><label style="margin:0">Show in plot</label></div>
+      <input value="${s.label}" data-role="label" style="margin-top:4px">
+      <div data-role="pal" style="margin-top:6px"></div>` +
+      (showLineExtras? `<div class="row" style="margin-top:6px"><div><input type="number" value="${s.width}" min="1" data-role="width"></div>
+        <div><select data-role="dash"><option value="solid">Solid</option><option value="dashed" ${s.dash?'selected':''}>Dashed</option></select></div></div>`:'');
+    container.appendChild(div);
+    div.querySelector('[data-role=vis]').onchange=e=>{ s.visible=e.target.checked; onChange(); };
+    div.querySelector('[data-role=label]').onchange=e=>{ s.label=e.target.value; onChange(); };
+    if(showLineExtras){
+      div.querySelector('[data-role=width]').onchange=e=>{ s.width=parseFloat(e.target.value); onChange(); };
+      div.querySelector('[data-role=dash]').onchange=e=>{ s.dash=e.target.value==='dashed'; onChange(); };
+    }
+    createPalette(div.querySelector('[data-role=pal]'), s.colorIdx, (color,idx)=>{ s.color=color; s.colorIdx=idx; onChange(); });
+  });
+}
+function fontRoleHTML(role,title){
+  return `<div class="subh">${title}</div>
+    <div class="row"><div><label>Family</label><select id="${role}Family">
+      <option value="Arial, Helvetica, sans-serif">Arial</option>
+      <option value="Georgia, serif">Georgia</option>
+      <option value="'Times New Roman', serif">Times New Roman</option>
+      <option value="'Courier New', monospace">Courier New</option>
+      <option value="Verdana, sans-serif">Verdana</option>
+    </select></div>
+    <div><label>Style</label><select id="${role}Style"><option value="normal">Normal</option><option value="italic">Italic</option><option value="bold">Bold</option><option value="bolditalic">Bold Italic</option></select></div></div>
+    <div class="row" style="margin-top:6px"><div><label>Size</label><input id="${role}Size" type="number" value="13"></div>
+    <div><label>Color</label><select id="${role}ColorMode">${role==='legend'?'<option value="match">Match series/group</option>':''}<option value="default">Default</option><option value="custom">Custom</option></select></div></div>
+    <div id="${role}ColorBox" style="display:none"><div id="pal-${role}"></div></div>`;
+}
+function initFontRole(role, onChange){
+  ['Family','Style','Size'].forEach(k=>{ const el=document.getElementById(role+k); el.addEventListener('input',onChange); el.addEventListener('change',onChange); });
+  const modeEl=document.getElementById(role+'ColorMode');
+  modeEl.addEventListener('change',()=>{ document.getElementById(role+'ColorBox').style.display = modeEl.value==='custom'?'block':'none'; onChange(); });
+  return createPalette(document.getElementById('pal-'+role), 1, onChange);
+}
+function roleFontAttrs(role){
+  return fontAttrs(document.getElementById(role+'Family').value, document.getElementById(role+'Style').value, document.getElementById(role+'Size').value);
+}
+function roleColor(role, pal, fallbackDefault, matchColor){
+  const mode=document.getElementById(role+'ColorMode').value;
+  if(mode==='match') return matchColor!==undefined?matchColor:fallbackDefault;
+  if(mode==='custom') return pal.get().color;
+  return fallbackDefault;
+}
+
+function drawLegend(items, cfg){
+  const {position,layout,gap,ml,mr,mt,mb,W,H} = cfg;
+  const horiz = layout==='horizontal';
+  const rowH=18;
+  const widths = items.map(it=> 24 + it.label.length*6.5);
+  const totalW = horiz ? widths.reduce((a,b)=>a+b+gap,0)-gap : Math.max(...widths,60);
+  const totalH = horiz ? rowH : items.length*rowH + (items.length-1)*gap;
+  const x0 = position.includes('left') ? ml+12 : W-mr-12-totalW;
+  const y0 = position.includes('top') ? mt+16 : H-mb-16-totalH;
+  let s='', cx=x0;
+  items.forEach((it,i)=>{
+    const ix = horiz? cx : x0;
+    const iy = horiz? y0 : y0+i*(rowH+gap);
+    if(it.type==='line') s+=`<line x1="${ix}" y1="${iy+8}" x2="${ix+16}" y2="${iy+8}" stroke="${it.color}" stroke-width="${it.width||2}" ${it.dash?'stroke-dasharray="6,4"':''}/>`;
+    else if(it.type==='box') s+=`<rect x="${ix}" y="${iy+3}" width="14" height="10" fill="${it.color}"/>`;
+    else if(it.type==='dot') s+=`<rect x="${ix+5}" y="${iy+5}" width="6" height="6" fill="${it.color}"/>`;
+    else s+=`<rect x="${ix}" y="${iy+2}" width="12" height="12" fill="${it.color}" fill-opacity="${it.opacity!==undefined?it.opacity:0.6}" stroke="${it.color}"/>`;
+    s+=`<text x="${ix+20}" y="${iy+13}" ${it.font} fill="${it.textColor}">${escXml(it.label)}</text>`;
+    if(horiz) cx += widths[i]+gap;
+  });
+  return s;
+}
+
+async function exportVectorPDF(svgEl, wIn, hIn, filename){
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF({unit:'in', format:[wIn,hIn]});
+  await pdf.svg(svgEl,{x:0,y:0,width:wIn,height:hIn});
+  pdf.save(filename);
+}
+
+function createPalette(container, initialIdx, onChange){
+  let idx = initialIdx||1;
+  function draw(){
+    container.innerHTML = '<div class="palette">'+PALETTE.map((c,i)=>`<div class="sw${i+1===idx?' sel':''}" style="background:${c}" data-i="${i+1}">${i+1}</div>`).join('')+
+      '</div><div class="palNum"><input type="number" min="1" max="40" value="'+idx+'"><span>type 1\u201340</span></div>';
+    container.querySelectorAll('.sw').forEach(el=>el.onclick=()=>{idx=parseInt(el.dataset.i);draw();onChange(PALETTE[idx-1],idx);});
+    container.querySelector('input').onchange=e=>{idx=Math.max(1,Math.min(40,parseInt(e.target.value)||1));draw();onChange(PALETTE[idx-1],idx);};
+  }
+  draw();
+  return {get:()=>({color:PALETTE[idx-1],idx}), set:(i)=>{idx=i;draw();}};
+}
+
+function parseDelimited(text){
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim().length);
+  if(!lines.length) return {headers:[],cols:[]};
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+  const headers = lines[0].split(delim).map(h=>h.trim());
+  const cols = headers.map(()=>[]);
+  for(let i=1;i<lines.length;i++){
+    const cells = lines[i].split(delim);
+    cells.forEach((c,j)=>{ if(j<cols.length){ const v=parseFloat(c); if(!isNaN(v)) cols[j].push(v); } });
+  }
+  return {headers,cols};
+}
+
+function loadFile(file, cb){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const sheet=wb.Sheets[wb.SheetNames[0]];
+      cb(XLSX.utils.sheet_to_csv(sheet));
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader=new FileReader();
+    reader.onload=e=>cb(e.target.result);
+    reader.readAsText(file);
+  }
+}
+
+function niceTicks(min,max,count){
+  if(min===max){min-=1;max+=1;}
+  const raw=(max-min)/count, mag=Math.pow(10,Math.floor(Math.log10(raw))), norm=raw/mag;
+  const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag;
+  const start=Math.ceil(min/step)*step;
+  const ticks=[];
+  for(let v=start; v<=max+1e-9; v+=step) ticks.push(Math.round(v*1000)/1000);
+  return ticks;
+}
+
+function quartileStats(arr){
+  const a=[...arr].sort((x,y)=>x-y); const n=a.length;
+  const q=(p)=>{ const idx=p*(n-1); const lo=Math.floor(idx), hi=Math.ceil(idx); return a[lo]+(a[hi]-a[lo])*(idx-lo); };
+  const q1=q(0.25), median=q(0.5), q3=q(0.75), iqr=q3-q1;
+  const loW=Math.max(a[0], q1-1.5*iqr), hiW=Math.min(a[n-1], q3+1.5*iqr);
+  const mean=a.reduce((s,v)=>s+v,0)/n;
+  return {q1,median,q3,iqr,loW,hiW,mean,min:a[0],max:a[n-1],n};
+}
+
+function gaussianKDE(data, points, bandwidth){
+  const n=data.length;
+  return points.map(x=>{
+    let s=0;
+    for(const d of data){ const u=(x-d)/bandwidth; s+=Math.exp(-0.5*u*u); }
+    return s/(n*bandwidth*Math.sqrt(2*Math.PI));
+  });
+}
+function silvermanBW(data){
+  const n=data.length, mean=data.reduce((a,b)=>a+b,0)/n;
+  const sd=Math.sqrt(data.reduce((a,b)=>a+(b-mean)**2,0)/(n-1))||1;
+  return 1.06*sd*Math.pow(n,-0.2) || 1;
+}
+
+function fontAttrs(family,styleMode,size){
+  let style='normal',weight='normal';
+  if(styleMode==='italic') style='italic';
+  else if(styleMode==='bold') weight='bold';
+  else if(styleMode==='bolditalic'){style='italic';weight='bold';}
+  return `font-family="${family}" font-style="${style}" font-weight="${weight}" font-size="${size}"`;
+}
+function escXml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function downloadSVG(svgEl, filename){
+  const blob=new Blob([svgEl.outerHTML],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+</script>
+<script>
+function $(id){return document.getElementById(id);}
+let mode='grid';
+function switchMode(m){ mode=m; $('tabGrid').classList.toggle('active',m==='grid'); $('tabStack').classList.toggle('active',m==='stack');
+  $('gridUI').style.display=m==='grid'?'block':'none'; $('stackUI').style.display=m==='stack'?'block':'none'; render(); }
+function randn(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+function checkGridHTML(idPrefix,n,names){
+  let h='<div class="chkgrid">';
+  for(let i=0;i<n;i++) h+=`<label><input type="checkbox" id="${idPrefix}${i}">${names?names[i]:('Plot '+(i+1))}</label>`;
+  return h+'</div>';
+}
+
+/* ============================================================ GRID ============================================================ */
+$('gridUI').innerHTML = `
+  <h2>Unit for all sizes</h2>
+  <select id="gUnit"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select>
+
+  <h2>Datasets (one file = one column)</h2>
+  <input type="file" id="gridFiles" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple>
+  <button class="ghost" onclick="loadGridSample()">Load 3-Panel Sample</button>
+  <div id="gridDatasetList"></div>
+
+  <h2>Grid Layout</h2>
+  <div class="box">
+    <div class="row"><div><label>Columns</label><input id="gCols" type="number" value="3" min="1"></div>
+      <div><label>Panel Arrangement</label><select id="gArrange">
+        <option value="v-above-d">Violin above Density</option>
+        <option value="d-above-v">Density above Violin</option>
+        <option value="v-beside-d">Violin beside Density</option>
+        <option value="d-beside-v">Density beside Violin</option>
+      </select></div></div>
+    <div class="row" style="margin-top:6px"><div><label>Column Gap</label><input id="gColGap" type="number" value="0.5" step="0.1"></div>
+      <div><label>Row Gap</label><input id="gRowGap" type="number" value="0.5" step="0.1"></div></div>
+    <div class="check"><input id="gManual" type="checkbox" onchange="renderSizeBox()"><label style="margin:0">Manually size columns &amp; rows (else fit to page)</label></div>
+    <div id="gAutoSizeBox">
+      <div class="row"><div><label>Page Width</label><input id="gPageW" type="number" value="21" step="0.1"></div>
+        <div><label>Page Height</label><input id="gPageH" type="number" value="29.7" step="0.1"></div></div>
+      <button class="ghost" onclick="$('gPageW').value=21;$('gPageH').value=29.7;$('gUnit').value='cm';render()">Use A4 Portrait</button>
+    </div>
+    <div id="gManualSizeBox" style="display:none">
+      <label>Column Width (each, applies to all columns)</label><input id="gColW" type="number" value="7" step="0.1">
+      <div class="row" style="margin-top:6px"><div><label>Violin Row Height</label><input id="gRowHV" type="number" value="7" step="0.1"></div>
+        <div><label>Density Row Height</label><input id="gRowHD" type="number" value="6" step="0.1"></div></div>
+      <div class="computed" id="gComputedSize"></div>
+    </div>
+  </div>
+
+  <h2>Default Axes (shared variable: violin Y / density X)</h2>
+  <div class="box">
+    <div class="row"><div><label>Start</label><input id="gVStart"></div><div><label>End</label><input id="gVEnd"></div><div><label>Step</label><input id="gVStep" value="1"></div></div>
+    <div class="check"><input id="gVInt" type="checkbox"><label style="margin:0">Whole numbers only</label></div>
+    <label>Tick label distance from axis (px)</label><input id="gTickPad" type="number" value="7" min="0">
+    <label>Density's own Y-axis (density value) ticks</label><input id="gTicksD" type="number" value="4" min="2">
+  </div>
+  <div class="box" id="gFontTick"></div>
+  <div class="box" id="gFontTitle"></div>
+  <div class="box">
+    <div class="check"><input id="gLabelsOn" type="checkbox" checked><label style="margin:0">Panel labels (A, B, C\u2026)</label></div>
+    <div class="check"><input id="gVlOn" type="checkbox" checked><label style="margin:0">Show violin legend (25\u201375%, IQR, Mean) once</label></div>
+  </div>
+
+  <h2>Bulk Apply to Selected Datasets</h2>
+  <div class="box">
+    <label>Axis Label (violin Y / density X)</label><input id="bcLabel" placeholder="e.g. RMSD (\u00c5)">
+    <div class="subh">Tick Range Override</div>
+    <div class="row"><div><label>Start</label><input id="bcStart"></div><div><label>End</label><input id="bcEnd"></div><div><label>Step</label><input id="bcStep"></div></div>
+    <div class="check"><input id="bcInt" type="checkbox"><label style="margin:0">Whole numbers only</label></div>
+    <label>Tick label distance override (px)</label><input id="bcPad">
+    <div class="subh">Font size / color override</div>
+    <div class="row"><div><input id="bcFontSize" type="number" placeholder="Size (px)"></div></div>
+    <div id="bcFontPal" style="margin-top:6px"></div>
+    <div id="bcDatasetChecks"></div>
+    <button onclick="applyBroadcast()">Apply to checked datasets</button>
+  </div>
+
+  <h2>Export</h2>
+  <button class="secondary" onclick="exportGridSVG()">Export as SVG</button>
+  <button class="secondary" onclick="exportGridPDF()">Export as Vector PDF</button>
+`;
+
+let datasets=[];
+let gTickPal, gTitlePal, bcPal;
+$('gFontTick').innerHTML = fontRoleHTML('gtick','Axis Tick Numbers (default)');
+$('gFontTitle').innerHTML = fontRoleHTML('gtitle','Axis Titles (default)');
+function initGridRoles(){ gTickPal=initFontRole('gtick',render); gTitlePal=initFontRole('gtitle',render); bcPal=createPalette($('bcFontPal'),1,()=>{}); }
+['gUnit','gCols','gArrange','gColGap','gRowGap','gPageW','gPageH','gColW','gRowHV','gRowHD',
+ 'gVStart','gVEnd','gVStep','gVInt','gTickPad','gTicksD','gLabelsOn','gVlOn'].forEach(id=>{
+  $(id).addEventListener('input',render); $(id).addEventListener('change',render);
+});
+function renderSizeBox(){
+  $('gAutoSizeBox').style.display = $('gManual').checked?'none':'block';
+  $('gManualSizeBox').style.display = $('gManual').checked?'block':'none';
+  render();
+}
+$('gridFiles').addEventListener('change', e=>{
+  [...e.target.files].forEach(f=>{
+    loadFile(f, csv=>{
+      const t=parseDelimited(csv);
+      datasets.push({name:f.name.replace(/\.[^.]+$/,''), cols:t.cols, colConfig:makeColConfig(t.headers,0), plotType:'both', ov:{}});
+      renderDatasetList(); render();
+    });
+  });
+});
+function removeDataset(i){ datasets.splice(i,1); renderDatasetList(); render(); }
+function renderDatasetList(){
+  const c=$('gridDatasetList'); c.innerHTML='';
+  datasets.forEach((d,i)=>{
+    const wrap=document.createElement('div'); wrap.className='dsEntry';
+    wrap.innerHTML=`<div class="row"><div><b>${i+1}. ${d.name}</b></div><div style="text-align:right"><span class="del" onclick="removeDataset(${i})" style="cursor:pointer;color:#c0392b">Remove \u2715</span></div></div>
+      <label>Plot type</label><select onchange="datasets[${i}].plotType=this.value;render()">
+        <option value="both" ${d.plotType==='both'?'selected':''}>Violin + Density</option>
+        <option value="violin" ${d.plotType==='violin'?'selected':''}>Violin only</option>
+        <option value="density" ${d.plotType==='density'?'selected':''}>Density only</option>
+      </select>
+      <details><summary>Groups (show/hide, label, color)</summary><div id="dsCols${i}"></div></details>`;
+    c.appendChild(wrap);
+    renderColConfigList($('dsCols'+i), d.colConfig, render, false);
+  });
+  $('bcDatasetChecks').innerHTML = '<label style="display:block;font-size:11px;color:var(--muted);margin:6px 0 3px">Apply to:</label>'+checkGridHTML('bcDs',datasets.length,datasets.map(d=>d.name));
+  renderSizeCompute();
+}
+function applyBroadcast(){
+  const label=$('bcLabel').value, start=$('bcStart').value, end=$('bcEnd').value, step=$('bcStep').value, intOnly=$('bcInt').checked;
+  const pad=$('bcPad').value, fsize=$('bcFontSize').value, fcolor=bcPal.get().color;
+  datasets.forEach((d,i)=>{
+    const cb=$('bcDs'+i); if(!cb||!cb.checked) return;
+    if(label) d.ov.label=label;
+    if(start!=='') d.ov.start=start; if(end!=='') d.ov.end=end; if(step!=='') d.ov.step=step;
+    if(intOnly) d.ov.intOnly=true;
+    if(pad!=='') d.ov.pad=pad;
+    if(fsize!=='') d.ov.fontSize=fsize;
+    d.ov.fontColor=fcolor;
+  });
+  render();
+}
+function loadGridSample(){
+  datasets=[];
+  const names=['RMSD','Rg','SASA'], base=[[2.8,0.35],[15.8,0.25],[8000,180]];
+  names.forEach((nm,ni)=>{
+    const heads=['Wild','T46I','P56H','P56S'], n=150;
+    const cols=heads.map((h,gi)=>Array.from({length:n},()=> base[ni][0]+(gi*0.03*base[ni][0]*0.02)+base[ni][1]*randn()));
+    datasets.push({name:nm, cols, colConfig:makeColConfig(heads,0), plotType:'both', ov:{}});
+  });
+  renderDatasetList(); render();
+}
+function renderSizeCompute(){
+  if(!$('gManual').checked){ $('gComputedSize').textContent=''; return; }
+  const cols=parseInt($('gCols').value)||3, triplets=Math.max(Math.ceil(datasets.length/cols),1);
+  const side = $('gArrange').value.includes('beside');
+  const colW=parseFloat($('gColW').value)||0, cg=parseFloat($('gColGap').value)||0, rg=parseFloat($('gRowGap').value)||0;
+  const rowHV=parseFloat($('gRowHV').value)||0, rowHD=parseFloat($('gRowHD').value)||0;
+  const totalW=cols*colW+(cols-1)*cg;
+  const rowsPerTriplet = side?1:2;
+  const rowH = side? Math.max(rowHV,rowHD) : (rowHV+rowHD);
+  const totalH=triplets*rowH+(triplets*rowsPerTriplet-1)*rg;
+  $('gComputedSize').textContent = `Computed page size: ${totalW.toFixed(1)} \u00d7 ${totalH.toFixed(1)} ${$('gUnit').value}`;
+}
+
+function panelViolin(dataset,x,y,w,h,fontA,fontB,tickCol,titleCol,tickPad,label,axisLabel,vStart,vEnd,vStep,vInt){
+  const ml=x+44,mr=x+w-8,mt=y+18,mb=y+h-30, drawW=mr-ml, drawH=mb-mt;
+  const groups=dataset.colConfig.filter(c=>c.visible).map(c=>({label:c.label,color:c.color,data:dataset.cols[c.colIndex]||[]})).filter(g=>g.data.length>1);
+  if(!groups.length) return '';
+  const all=groups.flatMap(g=>g.data);
+  const yMin = vStart!==''&&vStart!==undefined ? parseFloat(vStart) : Math.min(...all)-(Math.max(...all)-Math.min(...all))*0.15;
+  const yMax = vEnd!==''&&vEnd!==undefined ? parseFloat(vEnd) : Math.max(...all)+(Math.max(...all)-Math.min(...all))*0.15;
+  const yS=v=> mt+drawH-(v-yMin)/(yMax-yMin)*drawH;
+  const slotW=drawW/groups.length;
+  let s=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.1"/>`;
+  if(label) s+=`<text x="${x+2}" y="${y+14}" font-size="16" font-weight="800">${label}</text>`;
+  stepTicks(yMin,yMax,vStep||1,vInt).forEach(t=>{
+    const ty=yS(t);
+    s+=`<line x1="${ml-3}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/>`;
+    s+=`<text x="${ml-3-tickPad}" y="${ty+3.5}" text-anchor="end" ${fontA} fill="${tickCol}">${t}</text>`;
+  });
+  if(axisLabel) s+=`<text x="${ml-34}" y="${mt+drawH/2}" text-anchor="middle" ${fontA} fill="${titleCol}" transform="rotate(-90 ${ml-34} ${mt+drawH/2})">${escXml(axisLabel)}</text>`;
+  groups.forEach((g,i)=>{
+    const cx=ml+slotW*(i+0.5);
+    const bw=silvermanBW(g.data)||1;
+    const pts=Array.from({length:30},(_,k)=>yMin+k*(yMax-yMin)/29);
+    const dens=gaussianKDE(g.data,pts,bw); const maxD=Math.max(...dens)||1;
+    const hw=dens.map(d=> d/maxD*slotW*0.4);
+    let d=''; pts.forEach((p,k)=>{d+=(k===0?'M':'L')+(cx-hw[k])+' '+yS(p)+' ';});
+    for(let k=pts.length-1;k>=0;k--) d+='L'+(cx+hw[k])+' '+yS(pts[k])+' '; d+='Z';
+    s+=`<path d="${d}" fill="${g.color}" fill-opacity="0.55" stroke="${g.color}" stroke-width="1.2"/>`;
+    const st=quartileStats(g.data);
+    s+=`<line x1="${cx}" y1="${yS(st.loW)}" x2="${cx}" y2="${yS(st.hiW)}" stroke="#111" stroke-width="1.4"/>`;
+    s+=`<rect x="${cx-4}" y="${yS(st.q3)}" width="8" height="${yS(st.q1)-yS(st.q3)}" fill="#111"/>`;
+    s+=`<rect x="${cx-2}" y="${yS(st.mean)-2}" width="4" height="4" fill="#e53935"/>`;
+    const fsz=(fontB.match(/font-size="(\d+)/)||[])[1]||13;
+    const fam=(fontB.match(/font-family="([^"]+)/)||[])[1]||'Arial';
+    s+=`<text x="${cx}" y="${mb+16}" text-anchor="middle" font-size="${fsz}" font-weight="700" fill="${g.color}" font-family="${fam}">${escXml(g.label)}</text>`;
+  });
+  return s;
+}
+function panelDensity(dataset,x,y,w,h,fontA,tickCol,titleCol,tickPad,ticksY,axisLabel,vStart,vEnd,vStep,vInt){
+  const ml=x+44,mr=x+w-8,mt=y+22,mb=y+h-30, drawW=mr-ml, drawH=mb-mt;
+  const groups=dataset.colConfig.filter(c=>c.visible).map(c=>({label:c.label,color:c.color,data:dataset.cols[c.colIndex]||[]})).filter(g=>g.data.length>1);
+  if(!groups.length) return '';
+  const all=groups.flatMap(g=>g.data);
+  const xMin = vStart!==''&&vStart!==undefined ? parseFloat(vStart) : Math.min(...all);
+  const xMax = vEnd!==''&&vEnd!==undefined ? parseFloat(vEnd) : Math.max(...all);
+  const bins=16, binW=(xMax-xMin)/bins;
+  const hists=groups.map(g=>{ const c=new Array(bins).fill(0); g.data.forEach(v=>{let b=Math.floor((v-xMin)/binW); if(b>=bins)b=bins-1; if(b<0)b=0; c[b]++;}); return c.map(v=>v/(g.data.length*binW)); });
+  const yMax=Math.max(...hists.flat())*1.1||1;
+  const xS=v=> ml+(v-xMin)/(xMax-xMin)*drawW, yS=v=> mt+drawH-(v/yMax)*drawH;
+  let s=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.1"/>`;
+  stepTicks(xMin,xMax,vStep||1,vInt).forEach(t=>{ const tx=xS(t); s+=`<line x1="${tx}" y1="${mt+drawH}" x2="${tx}" y2="${mt+drawH+3}" stroke="#222"/><text x="${tx}" y="${mt+drawH+3+tickPad+9}" text-anchor="middle" ${fontA} fill="${tickCol}">${t}</text>`; });
+  linTicks(0,yMax,ticksY).forEach(t=>{ const ty=yS(t); s+=`<line x1="${ml-3}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/><text x="${ml-3-tickPad}" y="${ty+3.5}" text-anchor="end" ${fontA} fill="${tickCol}">${t}</text>`; });
+  if(axisLabel) s+=`<text x="${ml+drawW/2}" y="${mb+28}" text-anchor="middle" ${fontA} fill="${titleCol}">${escXml(axisLabel)}</text>`;
+  groups.forEach((g,gi)=>{
+    let d='M'+xS(xMin)+' '+yS(0)+' ';
+    hists[gi].forEach((h,b)=>{ const x1=xS(xMin+b*binW), x2=xS(xMin+(b+1)*binW); d+=`L${x1} ${yS(h)} L${x2} ${yS(h)} `; });
+    d+='L'+xS(xMax)+' '+yS(0);
+    s+=`<path d="${d}" fill="${g.color}" fill-opacity="0.15" stroke="${g.color}" stroke-width="1.4"/>`;
+  });
+  return s;
+}
+function buildGridSVG(){
+  if(!gTickPal) initGridRoles();
+  renderSizeCompute();
+  const manual=$('gManual').checked;
+  const cols=Math.max(parseInt($('gCols').value)||3,1), triplets=Math.max(Math.ceil(datasets.length/cols),1);
+  const arrange=$('gArrange').value, side=arrange.includes('beside');
+  const cg_cm=parseFloat($('gColGap').value)||0, rg_cm=parseFloat($('gRowGap').value)||0;
+  const unit=$('gUnit').value;
+  const colGap=physicalToPx(cg_cm,unit), rowGap=physicalToPx(rg_cm,unit);
+  const marginOuter=20;
+  let colW, rowHV, rowHD, W, H;
+  if(manual){
+    colW=physicalToPx($('gColW').value,unit);
+    rowHV=physicalToPx($('gRowHV').value,unit); rowHD=physicalToPx($('gRowHD').value,unit);
+    W=cols*colW+(cols-1)*colGap+marginOuter*2;
+    const rowH= side? Math.max(rowHV,rowHD) : (rowHV+rowHD+rowGap);
+    H=triplets*rowH+(triplets-1)*rowGap+marginOuter*2;
+  } else {
+    W=physicalToPx($('gPageW').value,unit)||800; H=physicalToPx($('gPageH').value,unit)||1100;
+    colW=(W-marginOuter*2-(cols-1)*colGap)/cols;
+    const rowsN = side? triplets : triplets*2;
+    const rowH=(H-marginOuter*2-(rowsN-1)*rowGap)/rowsN;
+    rowHV=rowH; rowHD=rowH;
+  }
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`;
+  if(!datasets.length){ svg+='</svg>'; return svg; }
+  const fontA=roleFontAttrs('gtick'), fontB=roleFontAttrs('gtitle'), tickCol=roleColor('gtick',gTickPal,'#333'), titleCol=roleColor('gtitle',gTitlePal,'#1c2330');
+  const defTickPad=parseFloat($('gTickPad').value)||7, ticksD=parseInt($('gTicksD').value)||4;
+  const gvStart=$('gVStart').value, gvEnd=$('gVEnd').value, gvStep=$('gVStep').value||1, gvInt=$('gVInt').checked;
+  const labels='ABCDEFGHIJKLMNOP';
+  datasets.forEach((ds,i)=>{
+    const tripletIdx=Math.floor(i/cols), colIdx=i%cols;
+    const x=marginOuter+colIdx*(colW+colGap);
+    const ov=ds.ov||{};
+    const fA = ov.fontSize? fontA.replace(/font-size="\d+"/,`font-size="${ov.fontSize}"`) : fontA;
+    const tCol = ov.fontColor || tickCol;
+    const tPad = ov.pad!==undefined&&ov.pad!==''? parseFloat(ov.pad): defTickPad;
+    const vS=ov.start!==undefined&&ov.start!==''?ov.start:gvStart, vE=ov.end!==undefined&&ov.end!==''?ov.end:gvEnd;
+    const vSt=ov.step!==undefined&&ov.step!==''?ov.step:gvStep, vI=ov.intOnly!==undefined?ov.intOnly:gvInt;
+    const axLabel=ov.label!==undefined?ov.label:'';
+    const lbl = $('gLabelsOn').checked?labels[i]:null;
+    if(!side){
+      let yV,yD;
+      if(arrange==='v-above-d'){ yV=marginOuter+tripletIdx*(rowHV+rowHD+rowGap); yD=yV+rowHV; }
+      else { yD=marginOuter+tripletIdx*(rowHV+rowHD+rowGap); yV=yD+rowHD; }
+      if(ds.plotType!=='density') svg+=panelViolin(ds,x,yV,colW,rowHV,fA,fontB,tCol,titleCol,tPad,lbl,axLabel,vS,vE,vSt,vI);
+      if(ds.plotType!=='violin') svg+=panelDensity(ds,x,yD,colW,rowHD,fA,tCol,titleCol,tPad,ticksD,axLabel,vS,vE,vSt,vI);
+    } else {
+      const y=marginOuter+tripletIdx*(Math.max(rowHV,rowHD)+rowGap);
+      const half=colW/2;
+      let xV,xD;
+      if(arrange==='v-beside-d'){ xV=x; xD=x+half; } else { xD=x; xV=x+half; }
+      if(ds.plotType!=='density') svg+=panelViolin(ds,xV,y,half,rowHV,fA,fontB,tCol,titleCol,tPad,lbl,axLabel,vS,vE,vSt,vI);
+      if(ds.plotType!=='violin') svg+=panelDensity(ds,xD,y,half,rowHD,fA,tCol,titleCol,tPad,ticksD,axLabel,vS,vE,vSt,vI);
+    }
+  });
+  if($('gVlOn').checked){
+    const items=[{type:'box',color:'#111',label:'25%~75%',font:fontA,textColor:tickCol},
+                 {type:'line',color:'#111',label:'Range within 1.5 IQR',font:fontA,textColor:tickCol},
+                 {type:'dot',color:'#e53935',label:'Mean',font:fontA,textColor:tickCol}];
+    svg+=drawLegend(items,{position:'top-right',layout:'vertical',gap:4,ml:W-marginOuter-160,mr:marginOuter,mt:marginOuter,mb:marginOuter,W,H});
+  }
+  svg+='</svg>'; return svg;
+}
+function exportGridSVG(){ const div=document.createElement('div'); div.innerHTML=buildGridSVG(); downloadSVG(div.querySelector('svg'),'grid-figure.svg'); }
+function exportGridPDF(){
+  const div=document.createElement('div'); div.innerHTML=buildGridSVG(); const svgEl=div.querySelector('svg');
+  const wIn=parseFloat(svgEl.getAttribute('width'))/96, hIn=parseFloat(svgEl.getAttribute('height'))/96;
+  exportVectorPDF(svgEl, wIn, hIn, 'grid-figure.pdf');
+}
+
+/* ============================================================ LINE STACK ============================================================ */
+$('stackUI').innerHTML = `
+  <h2>Unit for all sizes</h2>
+  <select id="sUnit"><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select>
+  <h2>Overall Layout</h2>
+  <select id="sLayout"><option value="vertical">Stacked (one below another)</option><option value="horizontal">Row (side by side)</option></select>
+
+  <h2>Line Plots</h2>
+  <button class="ghost" onclick="addLinePlot()">+ Add Line Plot</button>
+  <div id="stackList"></div>
+
+  <h2>Bulk Apply to Selected Plots</h2>
+  <div class="box">
+    <div class="subh">Renumber residues (X offset)</div>
+    <input id="bcOffset" type="number" value="0">
+    <div class="subh">X Tick Range</div>
+    <div class="row"><div><label>Start</label><input id="bcXStart"></div><div><label>End</label><input id="bcXEnd"></div><div><label>Step</label><input id="bcXStep"></div></div>
+    <div class="check"><input id="bcXInt" type="checkbox"><label style="margin:0">Whole numbers only (X)</label></div>
+    <div class="subh">Y Tick Range</div>
+    <div class="row"><div><label>Start</label><input id="bcYStart"></div><div><label>End</label><input id="bcYEnd"></div><div><label>Step</label><input id="bcYStep"></div></div>
+    <div class="check"><input id="bcYInt" type="checkbox"><label style="margin:0">Whole numbers only (Y)</label></div>
+    <div class="subh">Legend</div>
+    <select id="bcLegend"><option value="">(no change)</option><option value="on">Show legend</option><option value="off">Hide legend</option></select>
+    <div id="bcPlotChecks"></div>
+    <button onclick="applyStackBroadcast()">Apply to checked plots</button>
+  </div>
+
+  <h2>Bulk Add Region</h2>
+  <div class="box">
+    <div class="row"><div><input id="bcRStart" placeholder="Start"></div><div><input id="bcREnd" placeholder="End"></div></div>
+    <input id="bcRLabel" placeholder="Label" style="margin-top:6px">
+    <div id="bcRPal" style="margin-top:6px"></div>
+    <div id="bcRegionChecks"></div>
+    <button onclick="applyRegionBroadcast()">Add region to checked plots</button>
+  </div>
+
+  <h2>Export</h2>
+  <button class="secondary" onclick="exportStackSVG()">Export as SVG</button>
+  <button class="secondary" onclick="exportStackPDF()">Export as Vector PDF</button>
+`;
+let linePlots=[]; let bcRPal;
+$('sLayout').addEventListener('change',render); $('sUnit').addEventListener('change',render);
+function defaultCfg(){ return {xStart:'',xEnd:'',xStep:1,xIntOnly:false,xOffset:0,xPad:8,yStart:'',yEnd:'',yStep:1,yIntOnly:false,yPad:8,width:16,height:4,showLegend:true}; }
+function cfgFormHTML(id){
+  return `<div class="subh">Renumber residues (X offset)</div><input id="${id}XOffset" type="number" value="0">
+  <div class="subh">X Ticks</div>
+  <div class="row"><div><label>Start</label><input id="${id}XStart"></div><div><label>End</label><input id="${id}XEnd"></div><div><label>Step</label><input id="${id}XStep" value="1"></div></div>
+  <div class="check"><input id="${id}XIntOnly" type="checkbox"><label style="margin:0">Whole numbers only</label></div>
+  <div class="subh">Y Ticks</div>
+  <div class="row"><div><label>Start</label><input id="${id}YStart"></div><div><label>End</label><input id="${id}YEnd"></div><div><label>Step</label><input id="${id}YStep" value="1"></div></div>
+  <div class="check"><input id="${id}YIntOnly" type="checkbox"><label style="margin:0">Whole numbers only</label></div>
+  <div class="row" style="margin-top:6px"><div><label>X label space (px)</label><input id="${id}XPad" type="number" value="8"></div><div><label>Y label space (px)</label><input id="${id}YPad" type="number" value="8"></div></div>
+  <div class="row" style="margin-top:6px"><div><label>Plot Width</label><input id="${id}Width" type="number" value="16" step="0.1"></div><div><label>Plot Height</label><input id="${id}Height" type="number" value="4" step="0.1"></div></div>
+  <div class="check"><input id="${id}ShowLegend" type="checkbox" checked><label style="margin:0">Show legend on this plot</label></div>`;
+}
+function addLinePlot(){
+  linePlots.push({name:'Plot '+(linePlots.length+1), table:{headers:[],cols:[]}, colConfig:[], regions:[], cfg:defaultCfg()});
+  renderStackUI(); render();
+}
+function removeLinePlot(i){ linePlots.splice(i,1); renderStackUI(); render(); }
+function updateLPData(i, csvText){
+  const t=parseDelimited(csvText);
+  linePlots[i].table=t; linePlots[i].colConfig=makeColConfig(t.headers,1);
+  renderStackUI(); render();
+}
+function bindCfgForm(id,cfg){
+  ['XStart','XEnd','XStep','XIntOnly','XOffset','YStart','YEnd','YStep','YIntOnly','XPad','YPad','Width','Height','ShowLegend'].forEach(k=>{
+    const el=document.getElementById(id+k); if(!el) return;
+    const key=k.charAt(0).toLowerCase()+k.slice(1);
+    if(el.type==='checkbox') el.checked=!!cfg[key]; else el.value=cfg[key];
+    const handler=()=>{ cfg[key]= el.type==='checkbox'? el.checked : el.value; render(); };
+    el.addEventListener('input',handler); el.addEventListener('change',handler);
+  });
+}
+function renderStackUI(){
+  const c=$('stackList'); c.innerHTML='';
+  linePlots.forEach((lp,i)=>{
+    const div=document.createElement('div'); div.className='plotEntry';
+    div.innerHTML=`<div class="row"><div><b>${lp.name}</b></div><div style="text-align:right"><span class="del" onclick="removeLinePlot(${i})" style="cursor:pointer;color:#c0392b">Remove \u2715</span></div></div>
+      <label>Paste data (col1=X, rest=series)</label><textarea id="lpText${i}"></textarea>
+      <div class="row" style="margin-top:6px"><div><button class="ghost" onclick="updateLPData(${i}, document.getElementById('lpText${i}').value)">Parse</button></div>
+      <div><input type="file" accept=".csv,.tsv,.xlsx,.xls" onchange="loadFile(this.files[0], csv=>updateLPData(${i},csv))"></div></div>
+      <div id="lpCols${i}" style="margin-top:6px"></div>
+      <div id="lpRegions${i}"></div>
+      <details><summary>This plot's own axis/size settings</summary><div id="lpCfg${i}" style="margin-top:6px"></div></details>`;
+    c.appendChild(div);
+    renderColConfigList($('lpCols'+i), lp.colConfig, render, true);
+    renderLPRegions(i);
+    $('lpCfg'+i).innerHTML = cfgFormHTML('lp'+i);
+    bindCfgForm('lp'+i, lp.cfg);
+  });
+  $('bcPlotChecks').innerHTML = '<label style="display:block;font-size:11px;color:var(--muted);margin:6px 0 3px">Apply to:</label>'+checkGridHTML('bcP',linePlots.length,linePlots.map(l=>l.name));
+  $('bcRegionChecks').innerHTML = '<label style="display:block;font-size:11px;color:var(--muted);margin:6px 0 3px">Apply to:</label>'+checkGridHTML('bcRP',linePlots.length,linePlots.map(l=>l.name));
+  if(!bcRPal) bcRPal=createPalette($('bcRPal'),1,()=>{});
+}
+function applyStackBroadcast(){
+  const offset=$('bcOffset').value, xs=$('bcXStart').value,xe=$('bcXEnd').value,xst=$('bcXStep').value,xi=$('bcXInt').checked;
+  const ys=$('bcYStart').value,ye=$('bcYEnd').value,yst=$('bcYStep').value,yi=$('bcYInt').checked;
+  const legend=$('bcLegend').value;
+  linePlots.forEach((lp,i)=>{
+    const cb=$('bcP'+i); if(!cb||!cb.checked) return;
+    if(offset!=='') lp.cfg.xOffset=offset;
+    if(xs!=='') lp.cfg.xStart=xs; if(xe!=='') lp.cfg.xEnd=xe; if(xst!=='') lp.cfg.xStep=xst; if(xi) lp.cfg.xIntOnly=true;
+    if(ys!=='') lp.cfg.yStart=ys; if(ye!=='') lp.cfg.yEnd=ye; if(yst!=='') lp.cfg.yStep=yst; if(yi) lp.cfg.yIntOnly=true;
+    if(legend==='on') lp.cfg.showLegend=true; if(legend==='off') lp.cfg.showLegend=false;
+  });
+  renderStackUI(); render();
+}
+function applyRegionBroadcast(){
+  const s=parseFloat($('bcRStart').value), e=parseFloat($('bcREnd').value);
+  if(isNaN(s)||isNaN(e)) return;
+  const color=bcRPal.get().color, label=$('bcRLabel').value||'';
+  linePlots.forEach((lp,i)=>{ const cb=$('bcRP'+i); if(cb&&cb.checked) lp.regions.push({start:s,end:e,label,color}); });
+  $('bcRStart').value=''; $('bcREnd').value=''; $('bcRLabel').value='';
+  renderStackUI(); render();
+}
+function removeLPRegion(i,ri){ linePlots[i].regions.splice(ri,1); renderStackUI(); render(); }
+function renderLPRegions(i){
+  const c=$('lpRegions'+i); if(!c) return; c.innerHTML='';
+  linePlots[i].regions.forEach((r,ri)=>{
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<div style="width:12px;height:12px;border-radius:3px;background:${r.color}"></div><div class="txt">${r.start}-${r.end}${r.label?' ('+r.label+')':''}</div><div class="del" onclick="removeLPRegion(${i},${ri})">\u2715</div>`;
+    c.appendChild(d);
+  });
+}
+function orBlank(v,fb){ return (v!==''&&v!==undefined&&v!==null&&!isNaN(parseFloat(v))) ? parseFloat(v) : fb; }
+function panelLine(lp,cfg,x,y,w,h){
+  const ml=x+55,mr=x+w-15,mt=y+10,mb=y+h-32, drawW=mr-ml, drawH=mb-mt;
+  const offset=parseFloat(cfg.xOffset)||0;
+  const xs=(lp.table.cols[0]||[]).map(v=>v+offset);
+  const series=(lp.colConfig||[]).filter(c=>c.visible).map(c=>({label:c.label,color:c.color,width:c.width,dash:c.dash,data:lp.table.cols[c.colIndex]||[]})).filter(s=>s.data.length>1);
+  if(!xs.length||!series.length) return '';
+  const xMin=orBlank(cfg.xStart,Math.min(...xs)), xMax=orBlank(cfg.xEnd,Math.max(...xs));
+  const allY=series.flatMap(s=>s.data);
+  const yMin=orBlank(cfg.yStart,Math.min(...allY)), yMax=orBlank(cfg.yEnd,Math.max(...allY)*1.15);
+  const xPad=parseFloat(cfg.xPad)||8, yPad=parseFloat(cfg.yPad)||8;
+  const xS=v=> ml+(v-xMin)/(xMax-xMin)*drawW, yS=v=> mt+drawH-(v-yMin)/(yMax-yMin)*drawH;
+  let s='';
+  (lp.regions||[]).forEach(r=>{ const rx=xS(Math.max(r.start,xMin)), rw=xS(Math.min(r.end,xMax))-rx; if(rw>0) s+=`<rect x="${rx}" y="${mt}" width="${rw}" height="${drawH}" fill="${r.color}" fill-opacity="0.3"/>`; });
+  s+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1.1"/>`;
+  stepTicks(xMin,xMax,cfg.xStep||1,cfg.xIntOnly).forEach(t=>{ const tx=xS(t); if(tx<ml-1||tx>mr+1) return; s+=`<line x1="${tx}" y1="${mt+drawH}" x2="${tx}" y2="${mt+drawH+3}" stroke="#222"/><text x="${tx}" y="${mt+drawH+3+xPad+10}" text-anchor="middle" font-size="11">${t}</text>`; });
+  stepTicks(yMin,yMax,cfg.yStep||1,cfg.yIntOnly).forEach(t=>{ const ty=yS(t); if(ty<mt-1||ty>mb+1) return; s+=`<line x1="${ml-3}" y1="${ty}" x2="${ml}" y2="${ty}" stroke="#222"/><text x="${ml-3-yPad}" y="${ty+3.5}" text-anchor="end" font-size="11">${t}</text>`; });
+  series.forEach(sr=>{ let d=''; xs.forEach((xv,i)=>{ if(sr.data[i]!==undefined) d+=(d===''?'M':'L')+xS(xv)+' '+yS(sr.data[i])+' '; }); s+=`<path d="${d}" fill="none" stroke="${sr.color}" stroke-width="${sr.width}" ${sr.dash?'stroke-dasharray="6,4"':''}/>`; });
+  if(cfg.showLegend!==false){
+    let lx=ml+8, ly=mt+14;
+    series.forEach(sr=>{ s+=`<line x1="${lx}" y1="${ly}" x2="${lx+14}" y2="${ly}" stroke="${sr.color}" stroke-width="${sr.width}"/><text x="${lx+18}" y="${ly+4}" font-size="11">${escXml(sr.label)}</text>`; lx+=24+sr.label.length*6.5+14; });
+  }
+  return s;
+}
+function buildStackSVG(){
+  const unit=$('sUnit').value, horiz=$('sLayout').value==='horizontal';
+  const widthsPx=linePlots.map(lp=> physicalToPx(lp.cfg.width, unit));
+  const heightsPx=linePlots.map(lp=> physicalToPx(lp.cfg.height, unit));
+  let W,H;
+  if(horiz){ W=widthsPx.reduce((a,b)=>a+b,0)||physicalToPx(10,unit); H=Math.max(...heightsPx,physicalToPx(4,unit)); }
+  else { W=Math.max(...widthsPx,physicalToPx(10,unit)); H=heightsPx.reduce((a,b)=>a+b,0)||physicalToPx(4,unit); }
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`;
+  let cursor=0;
+  linePlots.forEach((lp,i)=>{
+    if(horiz){ svg+=panelLine(lp,lp.cfg,cursor,0,widthsPx[i],heightsPx[i]); cursor+=widthsPx[i]; }
+    else { svg+=panelLine(lp,lp.cfg,0,cursor,widthsPx[i],heightsPx[i]); cursor+=heightsPx[i]; }
+  });
+  svg+='</svg>'; return svg;
+}
+function exportStackSVG(){ const div=document.createElement('div'); div.innerHTML=buildStackSVG(); downloadSVG(div.querySelector('svg'),'line-stack.svg'); }
+function exportStackPDF(){
+  const div=document.createElement('div'); div.innerHTML=buildStackSVG(); const svgEl=div.querySelector('svg');
+  const wIn=parseFloat(svgEl.getAttribute('width'))/96, hIn=parseFloat(svgEl.getAttribute('height'))/96;
+  exportVectorPDF(svgEl,wIn,hIn,'line-stack.pdf');
+}
+
+function render(){
+  if(mode==='grid'){ $('svgHost').innerHTML = buildGridSVG(); }
+  else { $('svgHost').innerHTML = buildStackSVG(); }
+}
+loadGridSample();
+render();
+</script>
+</body>
+</html>
