@@ -62,6 +62,8 @@
     <input id="tickStep" type="number" value="10" min="1">
     <label>Tick label distance from axis (px)</label>
     <input id="tickPad" type="number" value="6" min="0">
+    <label>Axis title distance from tick labels (px)</label>
+    <input id="axisTitlePad" type="number" value="16" min="0">
     <div class="subh">Heatmap colormap (raw DCCM)</div>
     <select id="cmapPreset" onchange="onCmapChange()">
       <option value="GreenYellowRed">Green \u2013 Yellow \u2013 Red</option>
@@ -155,7 +157,7 @@ function parseMatrix(text){
   return m;
 }
 function matrixToCSV(m,startRes){
-  const n=m.length; let out=','+Array.from({length:n},(_,i)=>'V'+(i+1)).join(',')+'\n';
+  const n=m.length; let out=','+Array.from({length:n},(_,i)=>startRes+i).join(',')+'\n';
   m.forEach((row,i)=>{ out += (startRes+i)+','+row.map(v=>isFinite(v)?v.toFixed(4):'').join(',')+'\n'; });
   return out;
 }
@@ -182,14 +184,18 @@ function divergingColor(val,cmap){
   if(val>=0) return lerpColor(cmap.mid,cmap.pos,val);
   return lerpColor(cmap.mid,cmap.neg,-val);
 }
-['startRes','tickStep','tickPad','cutoff'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
+['startRes','tickStep','tickPad','axisTitlePad','cutoff'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
 
 /* ===== drawing a single heatmap panel ===== */
-function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes){
+let _clipCounter=0;
+function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,axisTitlePad){
   const n=matrix.length; if(!n) return '';
+  axisTitlePad = axisTitlePad||14;
   const ml=x+38,mr=x+w-6,mt=y+22,mb=y+h-30, drawW=mr-ml, drawH=mb-mt, cell=drawW/n;
+  const clipId='clip'+(_clipCounter++);
   let s='';
   if(title) s+=`<text x="${x+w/2}" y="${y+14}" text-anchor="middle" ${fontB} fill="${titleCol}">${escXml(title)}</text>`;
+  s+=`<clipPath id="${clipId}"><rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}"/></clipPath><g clip-path="url(#${clipId})">`;
   for(let r=0;r<n;r++){
     for(let c=0;c<n;c++){
       const v=matrix[r][c]; if(v===undefined||isNaN(v)) continue;
@@ -197,17 +203,43 @@ function drawHeatmap(matrix,x,y,w,h,title,mode,cmap,cutoff,posColor,negColor,fon
       if(mode==='diff'){ if(Math.abs(v)<cutoff) continue; color = v>0?posColor:negColor; }
       else { color = divergingColor(v,cmap); }
       const px=ml+c*cell, py=mt+(n-1-r)*cell;
-      s+=`<rect x="${px.toFixed(2)}" y="${py.toFixed(2)}" width="${(cell+0.5).toFixed(2)}" height="${(cell+0.5).toFixed(2)}" fill="${color}"/>`;
+      s+=`<rect x="${px.toFixed(2)}" y="${py.toFixed(2)}" width="${(cell+0.6).toFixed(2)}" height="${(cell+0.6).toFixed(2)}" fill="${color}"/>`;
     }
   }
+  s+='</g>';
   s+=`<rect x="${ml}" y="${mt}" width="${drawW}" height="${drawH}" fill="none" stroke="#222" stroke-width="1"/>`;
+  const xLabelY = mb+3+tickPad+10;
+  const yLabelX = ml-3-tickPad-10;
   stepTicks(startRes,startRes+n-1,tickStep,true).forEach(t=>{
     const idx=t-startRes; const px=ml+(idx+0.5)*cell, py=mt+(n-1-idx+0.5)*cell;
-    s+=`<line x1="${px}" y1="${mb}" x2="${px}" y2="${mb+3}" stroke="#222"/><text x="${px}" y="${mb+3+tickPad+10}" text-anchor="middle" ${fontA} fill="${tickCol}">${t}</text>`;
+    s+=`<line x1="${px}" y1="${mb}" x2="${px}" y2="${mb+3}" stroke="#222"/><text x="${px}" y="${xLabelY}" text-anchor="middle" ${fontA} fill="${tickCol}">${t}</text>`;
     s+=`<line x1="${ml-3}" y1="${py}" x2="${ml}" y2="${py}" stroke="#222"/><text x="${ml-3-tickPad}" y="${py+3.5}" text-anchor="end" ${fontA} fill="${tickCol}">${t}</text>`;
   });
-  s+=`<text x="${x+w/2}" y="${mb+3+tickPad+24}" text-anchor="middle" ${fontA} fill="${titleCol}">Residue</text>`;
-  s+=`<text x="${x+12}" y="${mt+drawH/2}" text-anchor="middle" ${fontA} fill="${titleCol}" transform="rotate(-90 ${x+12} ${mt+drawH/2})">Residue</text>`;
+  s+=`<text x="${x+w/2}" y="${xLabelY+axisTitlePad}" text-anchor="middle" ${fontA} fill="${titleCol}">Residue</text>`;
+  const yTitleX = yLabelX-axisTitlePad;
+  s+=`<text x="${yTitleX}" y="${mt+drawH/2}" text-anchor="middle" ${fontA} fill="${titleCol}" transform="rotate(-90 ${yTitleX} ${mt+drawH/2})">Residue</text>`;
+  return s;
+}
+function drawColorbar(x,y,h,cmap,fontA,titleCol){
+  const w=16, steps=40;
+  let s='';
+  for(let i=0;i<steps;i++){
+    const v=-1+2*i/(steps-1);
+    const yy=y+h-(i+1)*(h/steps);
+    s+=`<rect x="${x}" y="${yy.toFixed(2)}" width="${w}" height="${(h/steps+0.6).toFixed(2)}" fill="${divergingColor(v,cmap)}"/>`;
+  }
+  s+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#222" stroke-width="1"/>`;
+  [-1,-0.5,0,0.5,1].forEach(v=>{
+    const yy=y+h-(v+1)/2*h;
+    s+=`<line x1="${x+w}" y1="${yy}" x2="${x+w+4}" y2="${yy}" stroke="#222"/><text x="${x+w+7}" y="${yy+3.5}" ${fontA} fill="${titleCol}">${v}</text>`;
+  });
+  s+=`<text x="${x+w/2}" y="${y-8}" text-anchor="middle" ${fontA} fill="${titleCol}">Corr.</text>`;
+  return s;
+}
+function drawDiffLegend(x,y,posColor,negColor,cutoff,fontA,titleCol){
+  let s='';
+  s+=`<rect x="${x}" y="${y}" width="12" height="12" fill="${posColor}"/><text x="${x+16}" y="${y+10}" ${fontA} fill="${titleCol}">\u2265 +${cutoff}</text>`;
+  s+=`<rect x="${x}" y="${y+18}" width="12" height="12" fill="${negColor}"/><text x="${x+16}" y="${y+28}" ${fontA} fill="${titleCol}">\u2264 \u2212${cutoff}</text>`;
   return s;
 }
 function diffMatrix(a,b){ const n=Math.min(a.length,b.length); const out=[]; for(let i=0;i<n;i++){ out.push([]); for(let j=0;j<Math.min(a[i].length,b[i].length);j++) out[i].push(a[i][j]-b[i][j]); } return out; }
@@ -221,6 +253,8 @@ $('twoUI').innerHTML = `
     <button class="ghost" onclick="loadTwoSample()">Load Sample Data</button>
     <label style="margin-top:8px">Subtract</label>
     <select id="subOrder"><option value="AB">File A \u2212 File B</option><option value="BA">File B \u2212 File A</option></select>
+    <div class="subh">Panel titles</div>
+    <div class="row"><div><input id="labelA" value="File A"></div><div><input id="labelB" value="File B"></div><div><input id="labelDiff" value="Difference"></div></div>
   </div>
   <h2>Layout</h2>
   <div class="box">
@@ -237,7 +271,7 @@ $('twoUI').innerHTML = `
 let matA=null, matB=null;
 $('fileA').addEventListener('change',e=>{ if(e.target.files[0]) loadFile(e.target.files[0],csv=>{ matA=parseMatrix(csv); render(); }); });
 $('fileB').addEventListener('change',e=>{ if(e.target.files[0]) loadFile(e.target.files[0],csv=>{ matB=parseMatrix(csv); render(); }); });
-['subOrder','twoUnit','twoW','twoH','twoGap'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
+['subOrder','twoUnit','twoW','twoH','twoGap','labelA','labelB','labelDiff'].forEach(id=>{ $(id).addEventListener('input',render); $(id).addEventListener('change',render); });
 function sampleMatrix(n,seedBias){
   const m=[]; for(let i=0;i<n;i++){ m.push([]); for(let j=0;j<n;j++){ const d=Math.abs(i-j); let v=Math.exp(-d/8)*(1-2*((i+j+seedBias)%7===0?0.6:0)); if(d===0) v=1; m[i].push(Math.max(-1,Math.min(1,v+(Math.random()-0.5)*0.08))); } }
   return m;
@@ -247,17 +281,21 @@ function currentDiffTwo(){ if(!matA||!matB) return null; return $('subOrder').va
 function buildTwoSVG(){
   if(!tickPal) initRoles();
   const unit=$('twoUnit').value, wPx=physicalToPx($('twoW').value,unit), hPx=physicalToPx($('twoH').value,unit), gapPx=physicalToPx($('twoGap').value,unit);
-  const W=wPx*3+gapPx*2+40, H=hPx+40;
+  const cbarW=70, legendW=90;
+  const W=wPx*3+gapPx*2+40+cbarW+legendW, H=hPx+40;
   let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>`;
   if(!matA||!matB){ svg+='</svg>'; return svg; }
   const fontA=roleFontAttrs('tick'), fontB=roleFontAttrs('title'), tickCol=roleColor('tick',tickPal,'#333'), titleCol=roleColor('title',titlePal,'#1c2330');
   const cmap=currentCmap(), cutoff=parseFloat($('cutoff').value)||0.2, posC=diffPosPal.get().color, negC=diffNegPal.get().color;
   const tickStep=parseInt($('tickStep').value)||10, tickPad=parseFloat($('tickPad').value)||6, startRes=parseInt($('startRes').value)||1;
+  const atPad=parseFloat($('axisTitlePad').value)||16;
   const diff=currentDiffTwo();
   const y=20;
-  svg+=drawHeatmap(matA,20,y,wPx,hPx,'File A','raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
-  svg+=drawHeatmap(matB,20+wPx+gapPx,y,wPx,hPx,'File B','raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
-  svg+=drawHeatmap(diff,20+2*(wPx+gapPx),y,wPx,hPx,'Difference','diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+  svg+=drawHeatmap(matA,20,y,wPx,hPx,$('labelA').value,'raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,atPad);
+  svg+=drawHeatmap(matB,20+wPx+gapPx,y,wPx,hPx,$('labelB').value,'raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,atPad);
+  svg+=drawHeatmap(diff,20+2*(wPx+gapPx),y,wPx,hPx,$('labelDiff').value,'diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,atPad);
+  svg+=drawColorbar(20+3*wPx+2*gapPx+24,y+10,hPx*0.7,cmap,fontA,titleCol);
+  svg+=drawDiffLegend(20+3*wPx+2*gapPx+24+cbarW,y+hPx*0.7+10,posC,negC,cutoff,fontA,titleCol);
   svg+='</svg>'; return svg;
 }
 function exportTwoSVG(){ const div=document.createElement('div'); div.innerHTML=buildTwoSVG(); downloadSVG(div.querySelector('svg'),'dccm-comparison.svg'); }
@@ -267,11 +305,18 @@ function exportDiffCSV(){ const diff=currentDiffTwo(); if(!diff) return; downloa
 
 /* ============================= TAB 2: MULTI-FILE GRID ============================= */
 $('gridUI').innerHTML = `
-  <h2>Files (grouped into rows)</h2>
-  <div class="hint">Files fill rows in upload order. Within each row, the first file is the baseline; every other file in that row gets its own difference panel (file \u2212 baseline).</div>
+  <h2>Files (fill rows in upload order)</h2>
   <input type="file" id="mgFiles" accept=".csv,.tsv,.xlsx,.xls" multiple>
   <button class="ghost" onclick="loadGridSample()">Load 6-File Sample</button>
   <div id="mgFileList"></div>
+  <h2>Difference Pairs (you choose which minus which)</h2>
+  <div class="box">
+    <button class="ghost" onclick="autoFillPairs()">Auto-fill: first file in each row minus the rest</button>
+    <div class="row" style="margin-top:8px"><div><label>Minuend (A)</label><select id="pairA"></select></div><div><label>Subtracted (B)</label><select id="pairB"></select></div></div>
+    <input id="pairLabel" placeholder="Label (optional)" style="margin-top:6px">
+    <button onclick="addPair()">Add Pair (A \u2212 B)</button>
+    <div id="pairList"></div>
+  </div>
   <h2>Grid Layout</h2>
   <div class="box">
     <div class="row"><div><label>Raw plots per row</label><input id="mgRawPerRow" type="number" value="3" min="1"></div>
@@ -288,50 +333,70 @@ $('gridUI').innerHTML = `
   <button class="secondary" onclick="exportGridPDF()">Export as Vector PDF</button>
   <button class="secondary" onclick="exportAllDiffCSV()">Download All Difference Matrices (CSV)</button>
 `;
-let mgFiles=[];
+let mgFiles=[]; let diffPairs=[];
 $('mgFiles').addEventListener('change', e=>{
-  [...e.target.files].forEach(f=>{ loadFile(f, csv=>{ mgFiles.push({name:f.name.replace(/\.[^.]+$/,''), label:f.name.replace(/\.[^.]+$/,''), matrix:parseMatrix(csv)}); renderMgList(); render(); }); });
+  [...e.target.files].forEach(f=>{ loadFile(f, csv=>{ mgFiles.push({name:f.name.replace(/\.[^.]+$/,''), label:f.name.replace(/\.[^.]+$/,''), matrix:parseMatrix(csv)}); renderMgList(); refreshPairSelects(); render(); }); });
 });
-function removeMgFile(i){ mgFiles.splice(i,1); renderMgList(); render(); }
+function removeMgFile(i){ mgFiles.splice(i,1); renderMgList(); refreshPairSelects(); render(); }
 function renderMgList(){
   const c=$('mgFileList'); c.innerHTML='';
   mgFiles.forEach((f,i)=>{
     const d=document.createElement('div'); d.className='dsEntry';
-    d.innerHTML=`<div class="row"><div><input value="${f.label}" onchange="mgFiles[${i}].label=this.value;render()"></div>
+    d.innerHTML=`<div class="row"><div><input value="${f.label}" onchange="mgFiles[${i}].label=this.value;refreshPairSelects();render()"></div>
       <div style="max-width:60px;text-align:right"><span class="del" onclick="removeMgFile(${i})" style="cursor:pointer;color:#c0392b">\u2715</span></div></div>`;
     c.appendChild(d);
   });
+}
+function refreshPairSelects(){
+  ['pairA','pairB'].forEach(id=>{ $(id).innerHTML = mgFiles.map((f,i)=>`<option value="${i}">${i+1}. ${f.label}</option>`).join(''); });
+}
+function addPair(){
+  const a=parseInt($('pairA').value), b=parseInt($('pairB').value);
+  if(isNaN(a)||isNaN(b)||a===b||!mgFiles[a]||!mgFiles[b]) return;
+  const label = $('pairLabel').value || (mgFiles[a].label+' \u2212 '+mgFiles[b].label);
+  diffPairs.push({a,b,label});
+  $('pairLabel').value='';
+  renderPairList(); render();
+}
+function removePair(i){ diffPairs.splice(i,1); renderPairList(); render(); }
+function renderPairList(){
+  const c=$('pairList'); c.innerHTML='';
+  diffPairs.forEach((p,i)=>{
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<div class="txt">${escXml(p.label)}</div><div class="del" onclick="removePair(${i})">\u2715</div>`;
+    c.appendChild(d);
+  });
+}
+function autoFillPairs(){
+  const perRow=parseInt($('mgRawPerRow').value)||3;
+  diffPairs=[];
+  for(let g=0; g*perRow<mgFiles.length; g++){
+    const group=mgFiles.slice(g*perRow,(g+1)*perRow);
+    if(group.length<2) continue;
+    const baseIdx=g*perRow;
+    for(let i=1;i<group.length;i++) diffPairs.push({a:baseIdx+i,b:baseIdx,label:group[i].label+' \u2212 '+group[0].label});
+  }
+  renderPairList(); render();
 }
 function loadGridSample(){
   mgFiles=[];
   const chains=['TBK1c','TBK1d'], conds=['WT-WT','WT-E696K','E696K-WT'];
   chains.forEach((ch,ci)=> conds.forEach((cn,cni)=>{ mgFiles.push({name:ch+'-'+cn, label:cn, matrix:sampleMatrix(41, ci*10+cni*3)}); }));
-  renderMgList(); render();
+  renderMgList(); refreshPairSelects(); autoFillPairs();
 }
 ['mgRawPerRow','mgDiffPerRow','mgUnit','mgW','mgH','mgColGap','mgRowGap','mgSectionGap'].forEach(id=>{
   $(id).addEventListener('input',render); $(id).addEventListener('change',render);
 });
-function computeDiffPanels(){
-  const perRow=parseInt($('mgRawPerRow').value)||3;
-  const diffs=[];
-  for(let g=0; g*perRow<mgFiles.length; g++){
-    const group=mgFiles.slice(g*perRow,(g+1)*perRow);
-    if(group.length<2) continue;
-    const base=group[0];
-    for(let i=1;i<group.length;i++) diffs.push({label:group[i].label+' \u2212 '+base.label, matrix:diffMatrix(group[i].matrix,base.matrix)});
-  }
-  return diffs;
-}
 function buildGridSVG(){
   if(!tickPal) initRoles();
   const unit=$('mgUnit').value, wPx=physicalToPx($('mgW').value,unit), hPx=physicalToPx($('mgH').value,unit);
   const colGap=physicalToPx($('mgColGap').value,unit), rowGap=physicalToPx($('mgRowGap').value,unit), sectionGap=physicalToPx($('mgSectionGap').value,unit);
   const rawPerRow=Math.max(parseInt($('mgRawPerRow').value)||3,1), diffPerRow=Math.max(parseInt($('mgDiffPerRow').value)||2,1);
   const rawRows=Math.max(Math.ceil(mgFiles.length/rawPerRow),1);
-  const diffs=computeDiffPanels();
-  const diffRows=Math.max(Math.ceil(diffs.length/diffPerRow),1);
+  const diffRows=Math.max(Math.ceil(diffPairs.length/diffPerRow),1);
   const cols=Math.max(rawPerRow,diffPerRow);
-  const W=cols*wPx+(cols-1)*colGap+40;
+  const cbarW=90;
+  const W=cols*wPx+(cols-1)*colGap+40+cbarW;
   const rawH=rawRows*hPx+(rawRows-1)*rowGap;
   const diffH=diffRows*hPx+(diffRows-1)*rowGap;
   const H=rawH+sectionGap+diffH+40;
@@ -340,26 +405,32 @@ function buildGridSVG(){
   const fontA=roleFontAttrs('tick'), fontB=roleFontAttrs('title'), tickCol=roleColor('tick',tickPal,'#333'), titleCol=roleColor('title',titlePal,'#1c2330');
   const cmap=currentCmap(), cutoff=parseFloat($('cutoff').value)||0.2, posC=diffPosPal.get().color, negC=diffNegPal.get().color;
   const tickStep=parseInt($('tickStep').value)||10, tickPad=parseFloat($('tickPad').value)||6, startRes=parseInt($('startRes').value)||1;
+  const atPad=parseFloat($('axisTitlePad').value)||16;
   mgFiles.forEach((f,i)=>{
     const r=Math.floor(i/rawPerRow), c=i%rawPerRow;
     const x=20+c*(wPx+colGap), y=20+r*(hPx+rowGap);
-    svg+=drawHeatmap(f.matrix,x,y,wPx,hPx,f.label,'raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+    svg+=drawHeatmap(f.matrix,x,y,wPx,hPx,f.label,'raw',cmap,0,0,0,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,atPad);
   });
+  svg+=drawColorbar(20+cols*wPx+(cols-1)*colGap+24,20+10,rawH*0.7,cmap,fontA,titleCol);
   const diffY0=20+rawH+sectionGap;
-  diffs.forEach((d,i)=>{
+  diffPairs.forEach((p,i)=>{
+    if(!mgFiles[p.a]||!mgFiles[p.b]) return;
+    const d=diffMatrix(mgFiles[p.a].matrix,mgFiles[p.b].matrix);
     const r=Math.floor(i/diffPerRow), c=i%diffPerRow;
     const x=20+c*(wPx+colGap), y=diffY0+r*(hPx+rowGap);
-    svg+=drawHeatmap(d.matrix,x,y,wPx,hPx,d.label,'diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes);
+    svg+=drawHeatmap(d,x,y,wPx,hPx,p.label,'diff',cmap,cutoff,posC,negC,fontA,fontB,tickCol,titleCol,tickPad,tickStep,startRes,atPad);
   });
+  svg+=drawDiffLegend(20+cols*wPx+(cols-1)*colGap+24,diffY0+10,posC,negC,cutoff,fontA,titleCol);
   svg+='</svg>'; return svg;
 }
 function exportGridSVG(){ const div=document.createElement('div'); div.innerHTML=buildGridSVG(); downloadSVG(div.querySelector('svg'),'dccm-grid.svg'); }
 function exportGridPDF(){ const div=document.createElement('div'); div.innerHTML=buildGridSVG(); const svgEl=div.querySelector('svg');
   exportVectorPDF(svgEl, parseFloat(svgEl.getAttribute('width'))/96, parseFloat(svgEl.getAttribute('height'))/96, 'dccm-grid.pdf'); }
 function exportAllDiffCSV(){
-  const diffs=computeDiffPanels(); if(!diffs.length) return;
+  if(!diffPairs.length) return;
   const startRes=parseInt($('startRes').value)||1;
-  diffs.forEach(d=> downloadText(matrixToCSV(d.matrix,startRes), 'diff-'+d.label.replace(/[^a-z0-9]+/gi,'_')+'.csv'));
+  diffPairs.forEach(p=>{ if(!mgFiles[p.a]||!mgFiles[p.b]) return; const d=diffMatrix(mgFiles[p.a].matrix,mgFiles[p.b].matrix);
+    downloadText(matrixToCSV(d,startRes), 'diff-'+p.label.replace(/[^a-z0-9]+/gi,'_')+'.csv'); });
 }
 
 /* ============================= common ============================= */
